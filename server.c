@@ -8,6 +8,7 @@
 #define BUFFER_SIZE 1024
 
 void connect_client();
+void sync_file_io(char* file_name, const char* content, const char* access_mode);
 
 int main(int argc, char const* argv[]){
 	connect_client();
@@ -64,6 +65,24 @@ void connect_client(){
 		}
 		printf("buffer: %s\n", buffer);
 		printf("valread: %ld\n", valread);
-	}
+		sync_file_io("test.txt", buffer, "w");
+	}	
+}
+
+void sync_file_io(char* file_name, const char* content, const char* access_mode){
+	FILE* fp;
 	
+	if((fp = fopen(file_name, access_mode))==NULL){
+		printf("\n can not open this file \n\n");
+		return;
+	}
+
+	printf("The file is opened\n");
+	
+	if(strlen(content)>0){
+		fputs(content, fp);
+		fputs("\n",fp);
+	}
+
+	fclose(fp);
 }
