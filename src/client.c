@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#include "../include/message.h"
+
 #define PORT 8080
 #define BUF_SIZE 1024
 #define LOCAL_HOST "127.0.0.1"
@@ -47,6 +49,11 @@ int main(int argc, char const* argv[]){
 			close(client_fd);
 			break;			
 		}
+		
+		_Message message;
+		
+		message.header.type = getMessageType(input_buffer);
+		printf("%s\n",getMode(message.header.type));	
 		send(client_fd, input_buffer, strlen(input_buffer), 0);
 		
 		printf("\n successful send to server \n\n");
