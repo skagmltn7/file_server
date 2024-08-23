@@ -11,6 +11,7 @@
 #define BUF_SIZE 1024
 #define LOCAL_HOST "127.0.0.1"
 #define EXIT "EXIT"
+#define DELIM " \n"
 
 _Bool start_with(char* pre, char* str, int strlen);
 char* touppercase(char* str, int len);
@@ -18,6 +19,7 @@ char* touppercase(char* str, int len);
 int main(int argc, char const* argv[]){
 	int status, client_fd;
 	_Message message;
+	char *cmd, *file_name, *offset, *content;
 	struct sockaddr_in server_addr;
 
 	if((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
@@ -51,12 +53,24 @@ int main(int argc, char const* argv[]){
 			break;			
 		}
 		
-		printf("%ld\n",strlen(input_buffer));
-		message.header.type = getMessageType(touppercase(input_buffer, strlen(input_buffer)));
+		cmd = strtok(input_buffer,DELIM);
 
+		message.header.type = getMessageType(touppercase(cmd, strlen(cmd)));
 		if(message.header.type == UNKNOWN){
 			printf("\n syntax error \n\n");
 			continue;
+		}
+
+// TODO:입력문 split처리
+		switch(message.header.type){
+			case GETALL:
+				break;
+			file_name = strtok(NULL, DELIM);
+			case GET:
+			case DELETE:
+			case PUT:
+				printf("%s\n", file_name);
+				break;
 		}
 		
 		send(client_fd, &message, sizeof(message), 0);
