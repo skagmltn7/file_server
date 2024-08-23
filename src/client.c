@@ -10,13 +10,14 @@
 #define PORT 8080
 #define BUF_SIZE 1024
 #define LOCAL_HOST "127.0.0.1"
-#define EXIT "exit"
+#define EXIT "EXIT"
 
 _Bool start_with(char* pre, char* str, int strlen);
-char* tolowercase(char* str, int len);
+char* touppercase(char* str, int len);
 
 int main(int argc, char const* argv[]){
 	int status, client_fd;
+	_Message message;
 	struct sockaddr_in server_addr;
 
 	if((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
@@ -45,16 +46,20 @@ int main(int argc, char const* argv[]){
 		scanf(" %[^;]",input_buffer);
 		getchar();
 		
-		if(start_with(EXIT, tolowercase(input_buffer,strlen(EXIT)), strlen(EXIT))){
+		if(start_with(EXIT, touppercase(input_buffer,strlen(EXIT)), strlen(EXIT))){
 			close(client_fd);
 			break;			
 		}
 		
-		_Message message;
+		printf("%ld\n",strlen(input_buffer));
+		message.header.type = getMessageType(touppercase(input_buffer, strlen(input_buffer)));
+
+		if(message.header.type == UNKNOWN){
+			printf("\n syntax error \n\n");
+			continue;
+		}
 		
-		message.header.type = getMessageType(input_buffer);
-		printf("%s\n",getMode(message.header.type));	
-		send(client_fd, input_buffer, strlen(input_buffer), 0);
+		send(client_fd, &message, sizeof(message), 0);
 		
 		printf("\n successful send to server \n\n");
 	}
@@ -62,16 +67,15 @@ int main(int argc, char const* argv[]){
 	return 0;	
 }
 
-char* tolowercase(char* str, int len){
+char* touppercase(char* str, int len){
 	char* res = (char*)malloc(len * sizeof(char));
 
 	for(int i=0; i<len; i++){
 		res[i] = str[i];
-		if(str[i]>='A' && str[i]<='Z'){
-			res[i] += 'a' - 'A';
+		if(str[i]>='a' && str[i]<='z'){
+			res[i] -= 'a' - 'A';
 		}
 	}
-
 	return res;
 }
 
