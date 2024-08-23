@@ -4,6 +4,9 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include "../include/message.h"
+
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
@@ -56,16 +59,21 @@ void connect_client(){
 //	printf("successful connect with client: %d:%d\n",addr.sin_addr, PORT);
 	for(;;){
 
-		char buffer[BUFFER_SIZE]={0};
-		valread = read(new_socket, buffer, BUFFER_SIZE-1);
+//		char buffer[BUFFER_SIZE]={0};
+//		valread = read(new_socket, buffer, BUFFER_SIZE-1);
+		_Message message;
+		valread = recv(new_socket, &message, sizeof(message), 0);
 		if(valread==0){
 			close(new_socket);
 			close(server_fd);	
 			break;
 		}
+		printf("mode is: %s\n", getMode(message.header.type));
+/**
 		printf("buffer: %s\n", buffer);
 		printf("valread: %ld\n", valread);
 		sync_file_io("test.txt", buffer, "w");
+**/
 	}	
 }
 
