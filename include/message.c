@@ -11,8 +11,9 @@ char* getMode(MessageType type){
 			return "a+";
 		case DELETE:
 			return "d";
+		default:
+		    return NULL;
 	}
-	return NULL;
 }
 
 MessageType getMessageType(char* input){
@@ -24,7 +25,6 @@ MessageType getMessageType(char* input){
 			return DELETE;
 		}else if(strcmp(input, "PUT")==0){
 			return PUT;
-		}
-	return UNKNOWN;
+		}else return UNKNOWN;
 }
 
