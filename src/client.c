@@ -65,20 +65,6 @@ int main(int argc, char const* argv[]){
 		    continue;
 		}
 
-// TODO:입력문 split처리
-		switch(message.header.type){
-			case GETALL:
-				break;
-			file_name = strtok(NULL, DELIM);
-			case GET:
-			case DELETE:
-			case PUT:
-				printf("%s\n", file_name);
-				break;
-		}
-		
-		send(client_fd, &message, sizeof(message), 0);
-		
         token = strtok(NULL, DELIM);
 
         if(message->header.type == GETALL){

@@ -56,8 +56,7 @@ void connect_client(){
 		exit(EXIT_FAILURE);
 	}
 
-//	printf("successful connect with client: %d:%d\n",addr.sin_addr, PORT);
-	for(;;){
+    printf("\nConnected to client: %s\n", inet_ntoa(addr.sin_addr));
 
 	while(1){
 		_Message* message = (_Message*)malloc(sizeof(_Message));
@@ -73,12 +72,8 @@ void connect_client(){
 			printf("\nCLOSE CONNECTION: %s\n\n", inet_ntoa(addr.sin_addr));
 			break;
 		}
-		printf("mode is: %s\n", getMode(message.header.type));
-/**
-		printf("buffer: %s\n", buffer);
-		printf("valread: %ld\n", valread);
-		sync_file_io("test.txt", buffer, "w");
-**/
+
+		//sync_file_io("test.txt", buffer, getMode(message->header.type));
         free(message);
 	}	
 }
