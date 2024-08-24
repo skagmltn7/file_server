@@ -1,13 +1,17 @@
-#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include "../include/message.h"
+
 #define PORT 8080
 #define BUFFER_SIZE 1024
 
 void connect_client();
+void sync_file_io(char* file_name, const char* content, const char* access_mode);
 
 int main(int argc, char const* argv[]){
 	connect_client();
@@ -52,18 +56,42 @@ void connect_client(){
 		exit(EXIT_FAILURE);
 	}
 
-//	printf("successful connect with client: %d:%d\n",addr.sin_addr, PORT);
-	for(;;){
+    printf("\nConnected to client: %s\n", inet_ntoa(addr.sin_addr));
 
-		char buffer[BUFFER_SIZE]={0};
-		valread = read(new_socket, buffer, BUFFER_SIZE-1);
+	while(1){
+		_Message* message = (_Message*)malloc(sizeof(_Message));
+        if(message == NULL){
+            printf("\nMemory allocation failed\n");
+            break;
+        }
+
+		valread = recv(new_socket, message, sizeof(*message), 0);
 		if(valread==0){
 			close(new_socket);
-			close(server_fd);	
+			close(server_fd);
+			printf("\nCLOSE CONNECTION: %s\n\n", inet_ntoa(addr.sin_addr));
 			break;
 		}
-		printf("buffer: %s\n", buffer);
-		printf("valread: %ld\n", valread);
-	}
+
+		//sync_file_io("test.txt", buffer, getMode(message->header.type));
+        free(message);
+	}	
+}
+
+void sync_file_io(char* file_name, const char* content, const char* access_mode){
+	FILE* fp;
 	
+	if((fp = fopen(file_name, access_mode))==NULL){
+		printf("\n can not open this file \n\n");
+		return;
+	}
+
+	printf("The file is opened\n");
+	
+	if(strlen(content)>0){
+		fputs(content, fp);
+		fputs("\n",fp);
+	}
+
+	fclose(fp);
 }
