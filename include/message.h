@@ -1,7 +1,6 @@
 #ifndef __MESSAGE_H__
 #define __MESSAGE_H__
 
-#include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -23,7 +22,7 @@ typedef struct{
 
 typedef struct{
 	long offset;
-	size_t length;
+	int length;
 	char content[MAX_MESSAGE_SIZE];
 } MessageBody;
 
