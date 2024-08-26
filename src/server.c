@@ -74,7 +74,7 @@ void exec_command(int new_socket){
 		message = (_Message*)malloc(sizeof(_Message));
         if(message == NULL){
             printf("\nMemory allocation failed\n");
-            break;
+            return;
         }
 
         valread = recv(new_socket, message, sizeof(*message), 0);
@@ -87,12 +87,6 @@ void exec_command(int new_socket){
 	}
 }
 
-void sync_file_io(char* file_name, const char* content, const char* access_mode){
-	FILE* fp;
-	
-	if((fp = fopen(file_name, access_mode))==NULL){
-		printf("\n can not open this file \n\n");
-		return;
 void sync_file_io(_Message* message){
 	FILE* fp = NULL;
 
