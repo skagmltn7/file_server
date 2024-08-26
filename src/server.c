@@ -13,7 +13,9 @@
 void connect_client();
 void sync_file_io(_Message* message);
 void exec_command(int new_socket);
-void command_get(FILE* fp, int length);
+void command_get(FILE** fp, int length);
+void command_put(FILE** fp, _Message* message);
+FILE* open_and_seek_file(_Message* message);
 
 int main(int argc, char const* argv[]){
 	connect_client();
@@ -82,44 +84,46 @@ void exec_command(int new_socket){
             free(message);
             return;
         }
-        sync_file_io(message);
+        switch(message->header.type){
+            case GETALL:
+                break;
+            case DELETE:
+                break;
+            case GET: case PUT:
+                sync_file_io(message);
+                break;
+        }
         free(message);
 	}
 }
 
 void sync_file_io(_Message* message){
-	FILE* fp = NULL;
-
-	if((fp = fopen(message->header.file_name, getMode(message->header.type)))==NULL){
-		perror("\n can not open this file ");
-		return ;
-	}
-
-	printf("\nThe file is opened\n\n");
-	fseek(fp, message->body.offset, SEEK_SET);
+	FILE* fp = open_and_seek_file(message);
 
 	if(message->header.type == PUT){
-	    if(strlen(message->body.content)>0){
-		    fputs(message->body.content, fp);
-        }
-	}else if(message->header.type == GET){
-        command_get(fp, message->body.length);
-	}
-
+        command_put(&fp, message);
+    }else if(message->header.type == GET){
+        command_get(&fp, message->body.length);
+    }
 	fclose(fp);
 }
 
-void command_get(FILE* fp, int length){
+void command_get(FILE** fp, int length){
+    if(*fp == NULL){
+        perror("\nFile not found");
+        return;
+    }
+
     char* ret = NULL;
     int length_left = length;
 
-    while(length_left > 0 && !feof(fp)){
+    while(length_left > 0 && !feof(*fp)){
         char buffer[MAX_BUF_SIZE] = {0};
         int length_read = length > MAX_BUF_SIZE ? MAX_BUF_SIZE : length_left + 1;
-        ret = fgets(buffer, length_read, fp);
+        ret = fgets(buffer, length_read, *fp);
 
         if(ret == NULL){
-            if(feof(fp)) {
+            if(feof(*fp)) {
                 break;
             }
             perror("fgets");
@@ -132,4 +136,23 @@ void command_get(FILE* fp, int length){
         if(buffer[strlen(ret)-1]=='\n') length_left++;
     }
     printf("\n");
+}
+
+void command_put(FILE** fp, _Message* message){
+    if(*fp==NULL){
+        printf("\nCreating file...\n\n");
+        *fp = fopen(message->header.file_name, "w+");
+    }
+    fputs(message->body.content, *fp);
+}
+
+FILE* open_and_seek_file(_Message* message){
+    FILE* fp = fopen(message->header.file_name, "r+");
+
+    if(fp!=NULL){
+        printf("\nThe file is opened\n\n");
+        fseek(fp, message->body.offset, SEEK_SET);
+    }
+
+    return fp;
 }

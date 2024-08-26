@@ -31,6 +31,5 @@ typedef struct{
 	MessageBody body;
 } _Message;
 
-char* getMode(MessageType type);
 MessageType getMessageType(char* input);
 #endif
