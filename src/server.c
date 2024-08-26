@@ -4,11 +4,15 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include "../include/message.h"
 
 #define PORT 8080
 #define MAX_BUF_SIZE 1024
+#define FILE_HOME "./file/"
 
 void connect_client();
 void sync_file_io(_Message* message);
@@ -17,6 +21,7 @@ void command_get(FILE** fp, int length);
 void command_put(FILE** fp, _Message* message);
 FILE* open_and_seek_file(_Message* message);
 void command_delete(_Message* message);
+void command_getall();
 
 int main(int argc, char const* argv[]){
 	connect_client();
@@ -87,6 +92,7 @@ void exec_command(int new_socket){
         }
         switch(message->header.type){
             case GETALL:
+                command_getall();
                 break;
             case DELETE:
                 command_delete(message);
@@ -165,4 +171,24 @@ void command_delete(_Message* message){
     }else{
         perror("\nError deleting file");
     }
+}
+
+void command_getall(){
+    DIR* dp = NULL;
+    struct dirent* dir;
+    struct stat buf;
+
+    if((dp = opendir(FILE_HOME)) == NULL){
+        perror("directory cannot be opened");
+        return;
+    }
+
+    while((dir = readdir(dp)) != NULL){
+    if (dir->d_type == 0 ||
+        (lstat(dir->d_name, &buf) != -1 || (S_IFMT & buf.st_mode) != S_IFDIR)) {
+        continue;
+    }
+        printf("%s\n", dir->d_name);
+    }
+    closedir(dp);
 }
