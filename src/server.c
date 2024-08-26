@@ -16,6 +16,7 @@ void exec_command(int new_socket);
 void command_get(FILE** fp, int length);
 void command_put(FILE** fp, _Message* message);
 FILE* open_and_seek_file(_Message* message);
+void command_delete(_Message* message);
 
 int main(int argc, char const* argv[]){
 	connect_client();
@@ -88,6 +89,7 @@ void exec_command(int new_socket){
             case GETALL:
                 break;
             case DELETE:
+                command_delete(message);
                 break;
             case GET: case PUT:
                 sync_file_io(message);
@@ -155,4 +157,12 @@ FILE* open_and_seek_file(_Message* message){
     }
 
     return fp;
+}
+
+void command_delete(_Message* message){
+    if(remove(message->header.file_name) == 0){
+        printf("\n%s deleted successfully\n", message->header.file_name);
+    }else{
+        perror("\nError deleting file");
+    }
 }
