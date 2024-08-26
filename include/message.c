@@ -1,20 +1,4 @@
 #include "message.h"
-#include <stdio.h>
-
-char* getMode(MessageType type){
-	switch(type){
-		case GETALL:
-			return"ra";
-		case GET:
-			return "r";
-		case PUT:	
-			return "a+";
-		case DELETE:
-			return "d";
-		default:
-		    return NULL;
-	}
-}
 
 MessageType getMessageType(char* input){
 		if(strcmp(input,"GET")==0){
