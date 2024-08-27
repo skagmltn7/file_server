@@ -15,13 +15,14 @@
 #define FILE_HOME "./file/"
 
 void connect_client();
-void sync_file_io(_Message* message);
+void sync_file_io(_Message* message, char* file_path);
 void exec_command(int new_socket);
 void command_get(FILE** fp, int length);
-void command_put(FILE** fp, _Message* message);
-FILE* open_and_seek_file(_Message* message);
-void command_delete(_Message* message);
+void command_put(FILE** fp, _Message* message, char* file_path);
+FILE* open_and_seek_file(_Message* message, char* file_path);
+void command_delete(_Message* message, char* file_path);
 void command_getall();
+char* get_file_path(char* path, char* file_name);
 
 int main(int argc, char const* argv[]){
 	connect_client();
@@ -77,6 +78,7 @@ void connect_client(){
 void exec_command(int new_socket){
     ssize_t valread;
     _Message* message = NULL;
+    char* file_path = NULL;
 
 	while(1){
 		message = (_Message*)malloc(sizeof(_Message));
@@ -95,21 +97,24 @@ void exec_command(int new_socket){
                 command_getall();
                 break;
             case DELETE:
-                command_delete(message);
+                file_path = get_file_path(FILE_HOME, message->header.file_name);
+                command_delete(message, file_path);
                 break;
             case GET: case PUT:
-                sync_file_io(message);
+                file_path = get_file_path(FILE_HOME, message->header.file_name);
+                sync_file_io(message, file_path);
                 break;
         }
+        free(file_path);
         free(message);
 	}
 }
 
-void sync_file_io(_Message* message){
-	FILE* fp = open_and_seek_file(message);
+void sync_file_io(_Message* message, char* file_path){
+	FILE* fp = open_and_seek_file(message, file_path);
 
 	if(message->header.type == PUT){
-        command_put(&fp, message);
+        command_put(&fp, message, file_path);
     }else if(message->header.type == GET){
         command_get(&fp, message->body.length);
     }
@@ -146,16 +151,16 @@ void command_get(FILE** fp, int length){
     printf("\n");
 }
 
-void command_put(FILE** fp, _Message* message){
+void command_put(FILE** fp, _Message* message, char* file_path){
     if(*fp==NULL){
         printf("\nCreating file...\n\n");
-        *fp = fopen(message->header.file_name, "w+");
+        *fp = fopen(file_path, "w+");
     }
     fputs(message->body.content, *fp);
 }
 
-FILE* open_and_seek_file(_Message* message){
-    FILE* fp = fopen(message->header.file_name, "r+");
+FILE* open_and_seek_file(_Message* message, char* file_path){
+    FILE* fp = fopen(file_path, "r+");
 
     if(fp!=NULL){
         printf("\nThe file is opened\n\n");
@@ -165,8 +170,8 @@ FILE* open_and_seek_file(_Message* message){
     return fp;
 }
 
-void command_delete(_Message* message){
-    if(remove(message->header.file_name) == 0){
+void command_delete(_Message* message, char* file_path){
+    if(remove(file_path) == 0){
         printf("\n%s deleted successfully\n", message->header.file_name);
     }else{
         perror("\nError deleting file");
@@ -182,13 +187,25 @@ void command_getall(){
         perror("directory cannot be opened");
         return;
     }
+    char* path = NULL;
 
     while((dir = readdir(dp)) != NULL){
-    if (dir->d_type == 0 ||
-        (lstat(dir->d_name, &buf) != -1 || (S_IFMT & buf.st_mode) != S_IFDIR)) {
-        continue;
-    }
+        char* path = get_file_path(FILE_HOME, dir->d_name);
+
+        if (lstat(path, &buf) != 0 || S_ISDIR(buf.st_mode)) {
+            continue;
+        }
+
         printf("%s\n", dir->d_name);
+        free(path);
     }
     closedir(dp);
+}
+
+char* get_file_path(char* path, char* file_name){
+    size_t path_len = strlen(path) + strlen(file_name) + 1;
+    char* ret = (char*)malloc(path_len * sizeof(char));
+    sprintf(ret, "%s%s", path, file_name);
+
+    return ret;
 }
