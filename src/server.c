@@ -41,7 +41,7 @@ void connect_client(){
 	}
 
 	if(setsockopt(server_fd, SOL_SOCKET, 
-				SO_REUSEADDR | SO_REUSEPORT,
+				SO_REUSEADDR,
 				&opt, sizeof(opt))){
 			perror("setsockopt");
 			exit(EXIT_FAILURE);	
@@ -99,13 +99,14 @@ void exec_command(int new_socket){
             case DELETE:
                 file_path = get_file_path(FILE_HOME, message->header.file_name);
                 command_delete(message, file_path);
+                free(file_path);
                 break;
             case GET: case PUT:
                 file_path = get_file_path(FILE_HOME, message->header.file_name);
                 sync_file_io(message, file_path);
+                free(file_path);
                 break;
         }
-        free(file_path);
         free(message);
 	}
 }
