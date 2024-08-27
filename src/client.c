@@ -139,4 +139,5 @@ char* to_upper_case(char* str, int len){
 
 void syntax_error(char* cause){
     printf("\n syntax error: %s \n\n", cause);
+    rewind(stdin);
 }
