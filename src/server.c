@@ -7,12 +7,17 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <stdarg.h>
 
 #include "../include/message.h"
+#include "../include/logging.h"
 
 #define PORT 8080
 #define MAX_BUF_SIZE 1024
 #define FILE_HOME "./file/"
+#define LOG_FILE_HOME "./log/"
+
+FILE* log_file;
 
 void connect_client();
 void sync_file_io(_Message* message, char* file_path, _Response* response);
@@ -23,9 +28,18 @@ FILE* open_and_seek_file(_Message* message, char* file_path);
 void command_delete(_Message* message, char* file_path, _Response* response);
 void command_getall(_Response* response);
 char* get_file_path(char* path, char* file_name);
+char* get_file_path(const char* file_home, ...);
+size_t compute_length(const char* first, va_list args);
+FILE* init_server();
 
 int main(int argc, char const* argv[]){
+    log_file = init_server();
+    log_info(log_file, "Starting server...\n");
+
 	connect_client();
+
+	log_info(log_file, "Shutdown server...\n");
+	fclose(log_file);
 	return 0;
 }
 
@@ -36,14 +50,14 @@ void connect_client(){
 	socklen_t addrlen = sizeof(addr);
 
 	if((listening_socket = socket(AF_INET, SOCK_STREAM,0))<0){
-		perror("socket failed");
+        log_error(log_file);
 		exit(EXIT_FAILURE);
 	}
 
 	if(setsockopt(listening_socket, SOL_SOCKET, 
 				SO_REUSEADDR,
 				&opt, sizeof(opt))){
-			perror("setsockopt");
+			log_error(log_file);
 			exit(EXIT_FAILURE);	
 	}
 
@@ -53,17 +67,17 @@ void connect_client(){
 	addr.sin_port = htons(PORT);
 
 	if (bind(listening_socket, (struct sockaddr*)&addr, sizeof(addr)) < 0){
-		perror("bind failed");
+	    log_error(log_file);
 		exit(EXIT_FAILURE);	
 	}
 
 	if(listen(listening_socket, 1) <0){
-		perror("listen");
+		log_error(log_file);
 		exit(EXIT_FAILURE);	
 	}
 
 	if((new_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) < 0 ){
-		perror("accept");
+		log_error(log_file);
 		exit(EXIT_FAILURE);
 	}
 
@@ -81,13 +95,13 @@ void exec_command(int new_socket){
     char* file_path = NULL;
     _Message* message = (_Message*)malloc(sizeof(_Message));
     if(message == NULL){
-        printf("\nMemory allocation failed\n");
+        log(log_file, LOG_LEVEL_ERROR, "%s\n", "Memory allocation failed");
         return;
     }
 
     _Response* response = (_Response*)malloc(sizeof(_Response));
     if(response == NULL){
-        printf("\nMemory allocation failed\n");
+        log(log_file, LOG_LEVEL_ERROR, "%s\n", "Memory allocation failed");
         return;
     }
 
@@ -105,17 +119,17 @@ void exec_command(int new_socket){
                 command_getall(response);
                 break;
             case DELETE:
-                file_path = get_file_path(FILE_HOME, message->header.file_name);
+                file_path = get_file_path(FILE_HOME, message->header.file_name, NULL);
                 command_delete(message, file_path, response);
                 free(file_path);
                 break;
             case GET: case PUT:
-                file_path = get_file_path(FILE_HOME, message->header.file_name);
+                file_path = get_file_path(FILE_HOME, message->header.file_name, NULL);
                 sync_file_io(message, file_path, response);
                 free(file_path);
                 break;
             default:
-                perror("\nInvalid command\n");
+                log(log_file, LOG_LEVEL_ERROR, "%s\n", "Invalid command");
                 make_response(response, ERROR, "Invalid command");
                 break;
         }
@@ -138,8 +152,7 @@ void sync_file_io(_Message* message, char* file_path, _Response* response){
 
 void command_get(FILE** fp, int length, _Response* response){
     if(*fp == NULL){
-        perror("\nFile not found");
-        make_response(response, ERROR, "File not found");
+        log_error(log_file);
         make_response(response, ERROR, "The file could not be found.");
         return;
     }
@@ -156,7 +169,7 @@ void command_get(FILE** fp, int length, _Response* response){
             if(feof(*fp)) {
                 break;
             }
-            perror("fgets");
+            log_error(log_file);
             return;
         }
 
@@ -170,7 +183,7 @@ void command_get(FILE** fp, int length, _Response* response){
 
 void command_put(FILE** fp, _Message* message, char* file_path, _Response* response){
     if(*fp==NULL){
-        printf("\nCreating file...\n\n");
+        log_info(log_file, "Creating file...\n");
         *fp = fopen(file_path, "w+");
     }
     fputs(message->body.content, *fp);
@@ -181,7 +194,7 @@ FILE* open_and_seek_file(_Message* message, char* file_path){
     FILE* fp = fopen(file_path, "r+");
 
     if(fp!=NULL){
-        printf("\nThe file is opened\n\n");
+        log_info(log_file, "The file is opened\n");
         fseek(fp, message->body.offset, SEEK_SET);
     }
 
@@ -192,8 +205,7 @@ void command_delete(_Message* message, char* file_path, _Response* response){
     if(remove(file_path) == 0){
         make_response(response, SUCCESS, "file deleted successfully");
     }else{
-        perror("\nError deleting file");
-        make_response(response, ERROR, "File not found");
+        log(log_file, LOG_LEVEL_ERROR, "%s : %s could not be found.\n", strerror(errno),file_path);
         make_response(response, ERROR, "The file could not be found.");
     }
 }
@@ -204,15 +216,14 @@ void command_getall(_Response* response){
     struct stat buf;
 
     if((dp = opendir(FILE_HOME)) == NULL){
-        perror("directory cannot be opened");
-        make_response(response, ERROR, "directory cannot be opened");
+        log_error(log_file);
         make_response(response, ERROR, "The directory could not be opened.");
         return;
     }
     char* path = NULL;
 
     while((dir = readdir(dp)) != NULL){
-        char* path = get_file_path(FILE_HOME, dir->d_name);
+        char* path = get_file_path(FILE_HOME, dir->d_name, NULL);
 
         if (lstat(path, &buf) != 0 || S_ISDIR(buf.st_mode)) {
             continue;
@@ -225,10 +236,45 @@ void command_getall(_Response* response){
     closedir(dp);
 }
 
-char* get_file_path(char* path, char* file_name){
-    size_t path_len = strlen(path) + strlen(file_name) + 1;
-    char* ret = (char*)malloc(path_len * sizeof(char));
-    sprintf(ret, "%s%s", path, file_name);
+char* get_file_path(const char* file_home, ...){
+    va_list args;
+    va_start(args, file_home);
 
+    va_list args_copy;
+    va_copy(args_copy, args);
+    size_t length = compute_length(file_home, args_copy);
+    va_end(args_copy);
+
+    char* result = (char*)malloc((length + 1) * sizeof(char));
+    if (result == NULL) {
+        perror("malloc failed");
+        exit(EXIT_FAILURE);
+    }
+
+    strcpy(result, file_home);
+    const char* str;
+    while ((str = va_arg(args, const char*)) != NULL) {
+        strcat(result, str);
+    }
+
+    va_end(args);
     return ret;
+}
+
+size_t compute_length(const char* first, va_list args) {
+    size_t length = strlen(first);
+    const char* str;
+    while ((str = va_arg(args, const char*)) != NULL) {
+        length += strlen(str);
+    }
+    return length;
+}
+
+FILE* init_server(){
+    char pid_str[10];
+    snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+    char* log_file_name = get_file_path(LOG_FILE_HOME, "server_", pid_str, NULL);
+    log_file = fopen(log_file_name, "a+");
+    free(log_file_name);
+    return log_file;
 }
