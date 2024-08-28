@@ -30,17 +30,17 @@ int main(int argc, char const* argv[]){
 }
 
 void connect_client(){
-    int server_fd, new_socket;
+    int listening_socket, new_socket;
 	struct sockaddr_in addr;
 	int opt = 1;
 	socklen_t addrlen = sizeof(addr);
 
-	if((server_fd = socket(AF_INET, SOCK_STREAM,0))<0){
+	if((listening_socket = socket(AF_INET, SOCK_STREAM,0))<0){
 		perror("socket failed");
 		exit(EXIT_FAILURE);
 	}
 
-	if(setsockopt(server_fd, SOL_SOCKET, 
+	if(setsockopt(listening_socket, SOL_SOCKET, 
 				SO_REUSEADDR,
 				&opt, sizeof(opt))){
 			perror("setsockopt");
@@ -52,17 +52,17 @@ void connect_client(){
 	addr.sin_addr.s_addr = INADDR_ANY;
 	addr.sin_port = htons(PORT);
 
-	if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0){
+	if (bind(listening_socket, (struct sockaddr*)&addr, sizeof(addr)) < 0){
 		perror("bind failed");
 		exit(EXIT_FAILURE);	
 	}
 
-	if(listen(server_fd, 1) <0){
+	if(listen(listening_socket, 1) <0){
 		perror("listen");
 		exit(EXIT_FAILURE);	
 	}
 
-	if((new_socket = accept(server_fd, (struct sockaddr*)&addr, &addrlen)) < 0 ){
+	if((new_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) < 0 ){
 		perror("accept");
 		exit(EXIT_FAILURE);
 	}
@@ -72,26 +72,25 @@ void connect_client(){
 
     printf("\nCLOSE CONNECTION: %s\n\n", inet_ntoa(addr.sin_addr));
     close(new_socket);
-    close(server_fd);
+    close(listening_socket);
 }
 
 void exec_command(int new_socket){
     ssize_t valread;
-    _Message* message = NULL;
     char* file_path = NULL;
+    _Message* message = (_Message*)malloc(sizeof(_Message));
+    if(message == NULL){
+        printf("\nMemory allocation failed\n");
+        return;
+    }
 
 	while(1){
-		message = (_Message*)malloc(sizeof(_Message));
-        if(message == NULL){
-            printf("\nMemory allocation failed\n");
-            return;
-        }
-
+	    memset(message, 0, sizeof(*message));
         valread = recv(new_socket, message, sizeof(*message), 0);
         if(valread<=0){
-            free(message);
-            return;
+            break;
         }
+
         switch(message->header.type){
             case GETALL:
                 command_getall();
@@ -106,9 +105,12 @@ void exec_command(int new_socket){
                 sync_file_io(message, file_path);
                 free(file_path);
                 break;
+            default:
+                perror("\nInvalid command\n");
+                break;
         }
-        free(message);
 	}
+    free(message);
 }
 
 void sync_file_io(_Message* message, char* file_path){

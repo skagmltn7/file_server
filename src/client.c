@@ -13,115 +13,154 @@
 #define EXIT "EXIT"
 #define DELIM " \n"
 
-_Bool is_exit(char* str);
+int is_exit(char* str);
 char* to_upper_case(char* str, int len);
 void syntax_error(char* cause);
+void connect_server();
+void exec_command(int client_fd);
+int parse_command(_Message* message, char* input_buffer);
+int parse_file_name(_Message* message, char* token);
+int parse_offset(_Message* message, char* token);
+int parse_length(_Message* message, char* token);
+int parse_content(_Message* message, char* token);
+int check_too_many_args(char* token);
 
 int main(int argc, char const* argv[]){
+    connect_server();
+    return 0;
+}
+
+void connect_server(){
 	int status, client_fd;
 	struct sockaddr_in server_addr;
 
 	if((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-		printf("\n Can not create socket \n");
-		return -1;
+		perror("\n Can not create socket \n");
+		return;
 	}
 
+    bzero(&server_addr, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_port = htons(PORT);
 
 	if(inet_pton(AF_INET, LOCAL_HOST, &server_addr.sin_addr) <= 0){
-		printf("\n Unsupported / Invalid address \n");
-		return -1;
+		perror("\n Unsupported / Invalid address \n");
+		return;
 	}
 
 	status = connect(client_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
 	if(status < 0){
-		printf("\n Connection Failed \n");
-		return -1;
+		perror("\n Connection Failed \n");
+		return;
 	}
 
-	while(1){
-		printf("CLIENT> ");
-
-		char input_buffer[BUF_SIZE];
-		scanf(" %[^;]",input_buffer);
-		getchar();
-
-		if(is_exit(input_buffer)){
-			close(client_fd);
-			break;
-		}
-
-        char* token = strtok(input_buffer,DELIM);
-        _Message* message = (_Message*)malloc(sizeof(_Message));
-        if(message == NULL){
-            printf("Memory allocation failed\n");
-            return -1;
-        }
-		message->header.type = getMessageType(to_upper_case(token, strlen(token)));
-
-		if(message->header.type == UNKNOWN){
-		    syntax_error("Undefined Command");
-		    continue;
-		}
-
-        token = strtok(NULL, DELIM);
-
-        if(message->header.type == GETALL){
-            if(token != NULL){
-                syntax_error("Too many arguments");
-                continue;
-            }
-        }else{ // GET, DELETE, PUT
-            if(token == NULL){
-                syntax_error("Missing arguments");
-                continue;
-            }
-            strncpy(message->header.file_name, token, strlen(token));
-
-            token = strtok(NULL, DELIM);
-            if(message->header.type == DELETE){
-                if(token != NULL){
-                    syntax_error("Too many arguments");
-                    continue;
-                }
-            }else{
-                if(token == NULL){
-                    syntax_error("Missing arguments");
-                    continue;
-                }
-
-                char* endptr;
-                message->body.offset = strtol(token, &endptr, 10);
-
-                if(message->header.type == GET){
-                    token = strtok(NULL, DELIM);
-                    if(token == NULL){
-                        syntax_error("Missing arguments");
-                        continue;
-                    }
-                    message->body.length = atoi(token);
-
-                    if((token = strtok(NULL, DELIM))!=NULL){
-                        syntax_error("Too many arguments");
-                        continue;
-                    }
-                }else if(message->header.type == PUT){
-                    token = strtok(NULL, "");
-                    strncpy(message->body.content, token, strlen(token));
-                }
-            }
-        }
-
-		send(client_fd, message, sizeof(*message), 0);
-		free(message);
-		printf("\n successful send to server \n\n");
-	}
-
-	return 0;	
+	exec_command(client_fd);
+	close(client_fd);
 }
 
-_Bool is_exit(char* str){
+void exec_command(int client_fd){
+    _Message* message = (_Message*)malloc(sizeof(_Message));
+    if (message == NULL) {
+        perror("Memory allocation failed\n");
+        return;
+    }
+
+    while(1){
+        printf("CLIENT> ");
+
+        char input_buffer[BUF_SIZE];
+        scanf(" %[^;]",input_buffer);
+        getchar();
+
+        if(is_exit(input_buffer)){
+            break;
+        }
+
+        memset(message, 0, sizeof(_Message));
+        if(parse_command(message, input_buffer)){
+            send(client_fd, message, sizeof(*message), 0);
+            printf("\n successful send to server \n\n");
+        }
+    }
+    free(message);
+}
+
+int parse_command(_Message* message, char* input_buffer){
+    char* token = strtok(input_buffer,DELIM);
+    message->header.type = getMessageType(to_upper_case(token, strlen(token)));
+
+    switch(message->header.type){
+        case GETALL:
+            return check_too_many_args(token);
+        case DELETE:
+            if(!parse_file_name(message, token))return 0;
+            return check_too_many_args(token);
+        case GET:
+            if(!parse_file_name(message, token))return 0;
+            if(!parse_offset(message, token))return 0;
+            if(!parse_length(message, token))return 0;
+            return check_too_many_args(token);
+        case PUT:
+            if(!parse_file_name(message, token)) return 0;
+            if(!parse_offset(message, token)) return 0;
+            if(!parse_content(message, token)) return 0;
+            return 1;
+        default:
+            syntax_error("Undefined Command");
+            return 0;
+    }
+}
+
+int parse_file_name(_Message* message, char* token){
+    token = strtok(NULL, DELIM);
+
+    if(token == NULL){
+        syntax_error("Missing arguments");
+        return 0;
+    }
+
+    strncpy(message->header.file_name, token, strlen(token));
+    return 1;
+}
+
+int parse_offset(_Message* message, char* token){
+    token = strtok(NULL, DELIM);
+    if(token == NULL){
+        syntax_error("Missing arguments");
+        return 0;
+    }
+
+    char* endptr;
+    message->body.offset = strtol(token, &endptr, 10);
+    return 1;
+}
+
+int parse_length(_Message* message, char* token){
+    token = strtok(NULL, DELIM);
+    if(token == NULL){
+        syntax_error("Missing arguments");
+        return 0;
+    }
+    message->body.length = atoi(token);
+    return 1;
+}
+
+int parse_content(_Message* message, char* token){
+    token = strtok(NULL, "");
+    strncpy(message->body.content, token, strlen(token));
+    return 1;
+}
+
+int check_too_many_args(char* token){
+    token = strtok(NULL, DELIM);
+    if(token){
+        syntax_error("Too many arguments");
+        return 0;
+    }
+    return 1;
+}
+
+int is_exit(char* str){
     return strlen(str)==strlen(EXIT)&& strcmp(EXIT, to_upper_case(str, strlen(str))) == 0;
 }
 
