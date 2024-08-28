@@ -244,16 +244,16 @@ char* get_file_path(const char* file_home, ...){
     size_t length = compute_length(file_home, args_copy);
     va_end(args_copy);
 
-    char* result = (char*)malloc((length + 1) * sizeof(char));
-    if (result == NULL) {
+    char* ret = (char*)malloc((length + 1) * sizeof(char));
+    if (ret == NULL) {
         perror("malloc failed");
         exit(EXIT_FAILURE);
     }
 
-    strcpy(result, file_home);
+    strcpy(ret, file_home);
     const char* str;
     while ((str = va_arg(args, const char*)) != NULL) {
-        strcat(result, str);
+        strcat(ret, str);
     }
 
     va_end(args);
