@@ -146,7 +146,9 @@ void sync_file_io(_Message* message, char* file_path, _Response* response){
     }else if(message->header.type == GET){
         command_get(&fp, message->body.length, response);
     }
-	fclose(fp);
+	if(fp!=NULL){
+	    fclose(fp);
+	}
 }
 
 void command_get(FILE** fp, int length, _Response* response){
