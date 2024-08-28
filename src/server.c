@@ -67,10 +67,10 @@ void connect_client(){
 		exit(EXIT_FAILURE);
 	}
 
-    printf("\nConnected to client: %s\n", inet_ntoa(addr.sin_addr));
+    printf("\nConnected to %s\n", inet_ntoa(addr.sin_addr));
     exec_command(new_socket);
 
-    printf("\nCLOSE CONNECTION: %s\n\n", inet_ntoa(addr.sin_addr));
+    printf("\nConnection to %s closed.\n", inet_ntoa(addr.sin_addr));
     close(new_socket);
     // TODO: 멀티스레드 환경 변경시 수정
     close(listening_socket);
@@ -140,6 +140,7 @@ void command_get(FILE** fp, int length, _Response* response){
     if(*fp == NULL){
         perror("\nFile not found");
         make_response(response, ERROR, "File not found");
+        make_response(response, ERROR, "The file could not be found.");
         return;
     }
 
@@ -173,7 +174,7 @@ void command_put(FILE** fp, _Message* message, char* file_path, _Response* respo
         *fp = fopen(file_path, "w+");
     }
     fputs(message->body.content, *fp);
-    make_response(response, SUCCESS, "write file successfully\n");
+    make_response(response, SUCCESS, "File written successfully.\n");
 }
 
 FILE* open_and_seek_file(_Message* message, char* file_path){
@@ -189,10 +190,11 @@ FILE* open_and_seek_file(_Message* message, char* file_path){
 
 void command_delete(_Message* message, char* file_path, _Response* response){
     if(remove(file_path) == 0){
-        make_response(response, SUCCESS, "delete file successfully");
+        make_response(response, SUCCESS, "file deleted successfully");
     }else{
         perror("\nError deleting file");
         make_response(response, ERROR, "File not found");
+        make_response(response, ERROR, "The file could not be found.");
     }
 }
 
@@ -204,6 +206,7 @@ void command_getall(_Response* response){
     if((dp = opendir(FILE_HOME)) == NULL){
         perror("directory cannot be opened");
         make_response(response, ERROR, "directory cannot be opened");
+        make_response(response, ERROR, "The directory could not be opened.");
         return;
     }
     char* path = NULL;
