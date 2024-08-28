@@ -27,7 +27,6 @@ void command_put(FILE** fp, _Message* message, char* file_path, _Response* respo
 FILE* open_and_seek_file(_Message* message, char* file_path);
 void command_delete(_Message* message, char* file_path, _Response* response);
 void command_getall(_Response* response);
-char* get_file_path(char* path, char* file_name);
 char* get_file_path(const char* file_home, ...);
 size_t compute_length(const char* first, va_list args);
 FILE* init_server();
@@ -271,6 +270,9 @@ size_t compute_length(const char* first, va_list args) {
 }
 
 FILE* init_server(){
+    mkdir(FILE_HOME,0755);
+    mkdir(LOG_FILE_HOME,0755);
+
     char pid_str[10];
     snprintf(pid_str, sizeof(pid_str), "%d", getpid());
     char* log_file_name = get_file_path(LOG_FILE_HOME, "server_", pid_str, NULL);
