@@ -244,7 +244,7 @@ char* get_file_path(const char* file_home, ...){
     size_t length = compute_length(file_home, args_copy);
     va_end(args_copy);
 
-    char* result = (char*)malloc((length + 1) * sizeof(char));
+    char* ret = (char*)malloc((length + 1) * sizeof(char));
     if (result == NULL) {
         perror("malloc failed");
         exit(EXIT_FAILURE);
