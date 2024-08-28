@@ -1,6 +1,6 @@
 #include "message.h"
 
-MessageType getMessageType(char* input){
+MessageType get_message_type(char* input){
 		if(strcmp(input,"GET")==0){
 			return GET;
 		}else if(strcmp(input, "GETALL")==0){
@@ -10,5 +10,10 @@ MessageType getMessageType(char* input){
 		}else if(strcmp(input, "PUT")==0){
 			return PUT;
 		}else return UNKNOWN;
+}
+
+void make_response(_Response* response, ResponseStatus status, char* data){
+    response->header.status = status;
+    strcpy(response->body.data,data);
 }
 

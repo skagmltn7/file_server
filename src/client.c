@@ -35,7 +35,7 @@ void connect_server(){
 	struct sockaddr_in server_addr;
 
 	if((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
-		perror("\n Can not create socket \n");
+		perror("\n Can not create socket");
 		return;
 	}
 
@@ -44,13 +44,13 @@ void connect_server(){
 	server_addr.sin_port = htons(PORT);
 
 	if(inet_pton(AF_INET, LOCAL_HOST, &server_addr.sin_addr) <= 0){
-		perror("\n Unsupported / Invalid address \n");
+		perror("\n Unsupported / Invalid address");
 		return;
 	}
 
 	status = connect(client_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
 	if(status < 0){
-		perror("\n Connection Failed \n");
+		perror("\n Connection Failed");
 		return;
 	}
 
@@ -59,12 +59,18 @@ void connect_server(){
 }
 
 void exec_command(int client_fd){
+    ssize_t valread;
     _Message* message = (_Message*)malloc(sizeof(_Message));
     if (message == NULL) {
         perror("Memory allocation failed\n");
         return;
     }
 
+    _Response* response = (_Response*)malloc(sizeof(_Response));
+    if (response == NULL) {
+        perror("Memory allocation failed\n");
+        return;
+    }
     while(1){
         printf("CLIENT> ");
 
@@ -77,17 +83,26 @@ void exec_command(int client_fd){
         }
 
         memset(message, 0, sizeof(_Message));
+        memset(response, 0, sizeof(_Response));
         if(parse_command(message, input_buffer)){
             send(client_fd, message, sizeof(*message), 0);
-            printf("\n successful send to server \n\n");
+            valread = recv(client_fd, response, sizeof(*response), 0);
+            if(valread<=0){
+                break;
+            }
+            if(response->header.status == ERROR){
+                printf("\n[ERROR]\n");
+            }
+            printf("\n%s\n\n", response->body.data);
         }
     }
     free(message);
+    free(response);
 }
 
 int parse_command(_Message* message, char* input_buffer){
     char* token = strtok(input_buffer,DELIM);
-    message->header.type = getMessageType(to_upper_case(token, strlen(token)));
+    message->header.type = get_message_type(to_upper_case(token, strlen(token)));
 
     switch(message->header.type){
         case GETALL:

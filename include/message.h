@@ -31,5 +31,24 @@ typedef struct{
 	MessageBody body;
 } _Message;
 
-MessageType getMessageType(char* input);
+typedef enum{
+    SUCCESS,
+    ERROR
+} ResponseStatus;
+
+typedef struct{
+	ResponseStatus status;
+} ResponseHeader;
+
+typedef struct{
+	char data[MAX_MESSAGE_SIZE];
+} ResponseBody;
+
+typedef struct{
+	ResponseHeader header;
+	ResponseBody body;
+} _Response;
+
+MessageType get_message_type(char* input);
+void make_response(_Response* response, ResponseStatus status, char* data);
 #endif
