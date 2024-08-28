@@ -60,6 +60,8 @@ void connect_server(){
 
 void exec_command(int client_fd){
     ssize_t valread;
+    char input_buffer[BUF_SIZE];
+
     _Message* message = (_Message*)malloc(sizeof(_Message));
     if (message == NULL) {
         perror("Memory allocation failed\n");
@@ -73,8 +75,7 @@ void exec_command(int client_fd){
     }
     while(1){
         printf("CLIENT> ");
-
-        char input_buffer[BUF_SIZE];
+        rewind(stdin);
         scanf(" %[^;]",input_buffer);
         getchar();
 
