@@ -39,7 +39,7 @@ void connect_server(){
 		return;
 	}
 
-    bzero(&server_addr, sizeof(server_addr));
+    memset(&server_addr, 0, sizeof(server_addr));
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_port = htons(PORT);
 
@@ -63,18 +63,16 @@ void exec_command(int client_fd){
     char input_buffer[BUF_SIZE];
 
     _Message* message = (_Message*)malloc(sizeof(_Message));
-    if (message == NULL) {
+    _Response* response = (_Response*)malloc(sizeof(_Response));
+    if (!message || !response) {
         perror("Memory allocation failed\n");
         return;
     }
 
-    _Response* response = (_Response*)malloc(sizeof(_Response));
-    if (response == NULL) {
-        perror("Memory allocation failed\n");
-        return;
-    }
     while(1){
         printf("CLIENT> ");
+
+        memset(input_buffer, 0, sizeof(input_buffer));
         rewind(stdin);
         scanf(" %[^;]",input_buffer);
         getchar();
@@ -103,6 +101,10 @@ void exec_command(int client_fd){
 
 int parse_command(_Message* message, char* input_buffer){
     char* token = strtok(input_buffer,DELIM);
+    if(!token){
+        syntax_error("Empty command");
+        return 0;
+    }
     message->header.type = get_message_type(to_upper_case(token, strlen(token)));
 
     switch(message->header.type){
@@ -194,5 +196,4 @@ char* to_upper_case(char* str, int len){
 
 void syntax_error(char* cause){
     printf("\n syntax error: %s \n\n", cause);
-    rewind(stdin);
 }

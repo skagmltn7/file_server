@@ -22,7 +22,7 @@ FILE* log_file;
 void connect_client();
 void sync_file_io(_Message* message, char* file_path, _Response* response);
 void exec_command(int new_socket);
-void command_get(FILE** fp, int length, _Response* response);
+void command_get(FILE* fp, int length, _Response* response);
 void command_put(FILE** fp, _Message* message, char* file_path, _Response* response);
 FILE* open_and_seek_file(_Message* message, char* file_path);
 void command_delete(_Message* message, char* file_path, _Response* response);
@@ -43,7 +43,7 @@ int main(int argc, char const* argv[]){
 }
 
 void connect_client(){
-    int listening_socket, new_socket;
+    int listening_socket, client_socket;
 	struct sockaddr_in addr;
 	int opt = 1;
 	socklen_t addrlen = sizeof(addr);
@@ -75,31 +75,27 @@ void connect_client(){
 		exit(EXIT_FAILURE);	
 	}
 
-	if((new_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) < 0 ){
+	if((client_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) < 0 ){
 		log_error(log_file);
 		exit(EXIT_FAILURE);
 	}
 
     printf("\nConnected to %s\n", inet_ntoa(addr.sin_addr));
-    exec_command(new_socket);
+    exec_command(client_socket);
 
     printf("\nConnection to %s closed.\n", inet_ntoa(addr.sin_addr));
-    close(new_socket);
+    close(client_socket);
     // TODO: 멀티스레드 환경 변경시 수정
     close(listening_socket);
 }
 
-void exec_command(int new_socket){
+void exec_command(int client_socket){
     ssize_t valread;
     char* file_path = NULL;
-    _Message* message = (_Message*)malloc(sizeof(_Message));
-    if(message == NULL){
-        log(log_file, LOG_LEVEL_ERROR, "%s\n", "Memory allocation failed");
-        return;
-    }
 
+    _Message* message = (_Message*)malloc(sizeof(_Message));
     _Response* response = (_Response*)malloc(sizeof(_Response));
-    if(response == NULL){
+    if(!message || !response){
         log(log_file, LOG_LEVEL_ERROR, "%s\n", "Memory allocation failed");
         return;
     }
@@ -108,7 +104,7 @@ void exec_command(int new_socket){
 	    memset(message, 0, sizeof(*message));
 	    memset(response, 0, sizeof(*response));
 
-        valread = recv(new_socket, message, sizeof(*message), 0);
+        valread = recv(client_socket, message, sizeof(*message), 0);
         if(valread<=0){
             break;
         }
@@ -132,7 +128,7 @@ void exec_command(int new_socket){
                 make_response(response, ERROR, "Invalid command");
                 break;
         }
-        send(new_socket, response, sizeof(*response), 0);
+        send(client_socket, response, sizeof(*response), 0);
 	}
     free(message);
     free(response);
@@ -144,15 +140,15 @@ void sync_file_io(_Message* message, char* file_path, _Response* response){
 	if(message->header.type == PUT){
         command_put(&fp, message, file_path, response);
     }else if(message->header.type == GET){
-        command_get(&fp, message->body.length, response);
+        command_get(fp, message->body.length, response);
     }
 	if(fp!=NULL){
 	    fclose(fp);
 	}
 }
 
-void command_get(FILE** fp, int length, _Response* response){
-    if(*fp == NULL){
+void command_get(FILE* fp, int length, _Response* response){
+    if(fp == NULL){
         log_error(log_file);
         make_response(response, ERROR, "The file could not be found.");
         return;
@@ -161,13 +157,13 @@ void command_get(FILE** fp, int length, _Response* response){
     char* ret = NULL;
     int length_left = length;
 
-    while(length_left > 0 && !feof(*fp)){
+    while(length_left > 0 && !feof(fp)){
         char buffer[MAX_BUF_SIZE] = {0};
-        int length_read = length > MAX_BUF_SIZE ? MAX_BUF_SIZE : length_left + 1;
-        ret = fgets(buffer, length_read, *fp);
+        int length_read = length_left > MAX_BUF_SIZE ? MAX_BUF_SIZE : length_left+1;
+        ret = fgets(buffer, length_read, fp);
 
         if(ret == NULL){
-            if(feof(*fp)) {
+            if(feof(fp)) {
                 break;
             }
             log_error(log_file);
@@ -221,7 +217,6 @@ void command_getall(_Response* response){
         make_response(response, ERROR, "The directory could not be opened.");
         return;
     }
-    char* path = NULL;
 
     while((dir = readdir(dp)) != NULL){
         char* path = get_file_path(FILE_HOME, dir->d_name, NULL);
