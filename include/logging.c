@@ -31,5 +31,6 @@ int print_log(FILE* file, const int line, const char* func, const LogLevel level
     va_start(ap, format);
     char_num = vfprintf(file, format, ap);
     va_end(ap);
+    fflush(file);
     return char_num;
 }
