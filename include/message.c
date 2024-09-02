@@ -1,4 +1,5 @@
 #include "message.h"
+#include <stdio.h>
 
 MessageType get_message_type(char* input){
 		if(strcmp(input,"GET")==0){
@@ -13,7 +14,10 @@ MessageType get_message_type(char* input){
 }
 
 void make_response(_Response* response, ResponseStatus status, char* data){
-    response->header.status = status;
-    strcpy(response->body.data,data);
+    response->body.status = status;
+    response->header.data_size = strlen(data)+1;
+    response->body.data = (char*)calloc(response->header.data_size, sizeof(char));
+    strncpy(response->body.data, data, response->header.data_size);
+}
 }
 

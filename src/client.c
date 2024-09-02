@@ -18,12 +18,9 @@ char* to_upper_case(char* str, int len);
 void syntax_error(char* cause);
 void connect_server();
 void exec_command(int client_fd);
-int parse_command(_Message* message, char* input_buffer);
-int parse_file_name(_Message* message, char* token);
-int parse_offset(_Message* message, char* token);
-int parse_length(_Message* message, char* token);
-int parse_content(_Message* message, char* token);
+_Message* parse_command(char* input_buffer);
 int check_too_many_args(char* token);
+void send_message(int client_fd, _Message* message);
 
 int main(int argc, char const* argv[]){
     connect_server();
@@ -55,19 +52,15 @@ void connect_server(){
 	}
 
 	exec_command(client_fd);
+	shutdown(client_fd, SHUT_RDWR);
 	close(client_fd);
 }
 
 void exec_command(int client_fd){
     ssize_t valread;
+    _Message* message;
+    _Response* response;
     char input_buffer[BUF_SIZE];
-
-    _Message* message = (_Message*)malloc(sizeof(_Message));
-    _Response* response = (_Response*)malloc(sizeof(_Response));
-    if (!message || !response) {
-        perror("Memory allocation failed\n");
-        return;
-    }
 
     while(1){
         printf("CLIENT> ");
@@ -78,104 +71,120 @@ void exec_command(int client_fd){
         getchar();
 
         if(is_exit(input_buffer)){
-            break;
+            return;
         }
 
-        memset(message, 0, sizeof(_Message));
-        memset(response, 0, sizeof(_Response));
-        if(parse_command(message, input_buffer)){
-            send(client_fd, message, sizeof(*message), 0);
-            valread = recv(client_fd, response, sizeof(*response), 0);
-            if(valread<=0){
-                break;
+        message = parse_command(input_buffer);
+        if(message){
+            send_message(client_fd, message);
+
+            response = (_Response*)calloc(1, sizeof(_Response));
+            valread = recv(client_fd, &response->header, sizeof(response->header), 0);
+            if(valread <= 0){
+            // TODO
+                continue;
             }
-            if(response->header.status == ERROR){
+
+            valread = recv(client_fd, &response->body, sizeof(response->body), 0);
+            if(valread <= 0){
+            // TODO
+                continue;
+            }
+
+            if(response->body.status == ERROR){
                 printf("\n[ERROR]\n");
+            }else{
+                printf("\n[DATA]\n");
             }
-            printf("\n%s\n\n", response->body.data);
+
+            if(response->header.data_size > 0){
+                response->body.data = (char*)calloc(response->header.data_size, sizeof(char));
+                valread = recv(client_fd, response->body.data, response->header.data_size, 0);
+                if(valread <= 0){
+                // TODO
+                    continue;
+                }
+
+                printf("\n%s\n\n", response->body.data);
+            }
+
+            if(message->header.file_name_size>0)
+                free(message->body.file_name);
+            if(message->header.content_size>0)
+                free(message->body.content);
+            if(message)
+                free(message);
+
+            if(response->header.data_size>0)
+                free(response->body.data);
+            if(response)
+            free(response);
         }
     }
-    free(message);
-    free(response);
 }
 
-int parse_command(_Message* message, char* input_buffer){
+_Message* parse_command(char* input_buffer){
+    _Message* message = (_Message*)malloc(sizeof(_Message));
+    message->body.file_name = NULL;
+    message->body.content = NULL;
+
     char* token = strtok(input_buffer,DELIM);
     if(!token){
         syntax_error("Empty command");
-        return 0;
+        return NULL;
     }
-    message->header.type = get_message_type(to_upper_case(token, strlen(token)));
+    message->body.type = get_message_type(to_upper_case(token, strlen(token)));
 
-    switch(message->header.type){
-        case GETALL:
-            return check_too_many_args(token);
-        case DELETE:
-            if(!parse_file_name(message, token))return 0;
-            return check_too_many_args(token);
-        case GET:
-            if(!parse_file_name(message, token))return 0;
-            if(!parse_offset(message, token))return 0;
-            if(!parse_length(message, token))return 0;
-            return check_too_many_args(token);
-        case PUT:
-            if(!parse_file_name(message, token)) return 0;
-            if(!parse_offset(message, token)) return 0;
-            if(!parse_content(message, token)) return 0;
-            return 1;
-        default:
-            syntax_error("Undefined Command");
-            return 0;
-    }
-}
-
-int parse_file_name(_Message* message, char* token){
-    token = strtok(NULL, DELIM);
-
-    if(token == NULL){
-        syntax_error("Missing arguments");
-        return 0;
+    if(message->body.type == UNKNOWN){
+        syntax_error("Undefined Command");
+        return NULL;
     }
 
-    strncpy(message->header.file_name, token, strlen(token));
-    return 1;
-}
+    if(message->body.type != GETALL){
+        token = strtok(NULL, DELIM);
+        if(!token){
+            syntax_error("Missing arguments");
+            return NULL;
+        }
+        message->header.file_name_size = (strlen(token)+1) * sizeof(char);
+        message->body.file_name = (char*)calloc(strlen(token)+1, sizeof(char));
+        strncpy(message->body.file_name, token, strlen(token)+1);
 
-int parse_offset(_Message* message, char* token){
-    token = strtok(NULL, DELIM);
-    if(token == NULL){
-        syntax_error("Missing arguments");
-        return 0;
+        if(message->body.type != DELETE){
+            token = strtok(NULL, DELIM);
+            if(!token){
+                syntax_error("Missing arguments");
+                return NULL;
+            }
+            char* endptr;
+            message->body.offset = strtol(token, &endptr, 10);
+
+            if(message->body.type == GET){
+                token = strtok(NULL, DELIM);
+                if(!token){
+                    syntax_error("Missing arguments");
+                    return NULL;
+                }
+                message->body.length = atoi(token);
+            }else if(message->body.type == PUT){
+                token = strtok(NULL, "");
+                if(!token){
+                    syntax_error("Missing arguments");
+                    return NULL;
+                }
+                message->body.content = (char*)calloc(strlen(token)+1, sizeof(char));
+                strncpy(message->body.content, token, strlen(token)+1);
+                message->header.content_size = (strlen(token)+1) * sizeof(char);
+            }
+        }
     }
 
-    char* endptr;
-    message->body.offset = strtol(token, &endptr, 10);
-    return 1;
-}
-
-int parse_length(_Message* message, char* token){
-    token = strtok(NULL, DELIM);
-    if(token == NULL){
-        syntax_error("Missing arguments");
-        return 0;
-    }
-    message->body.length = atoi(token);
-    return 1;
-}
-
-int parse_content(_Message* message, char* token){
-    token = strtok(NULL, "");
-    strncpy(message->body.content, token, strlen(token));
-    return 1;
-}
-
-int check_too_many_args(char* token){
     token = strtok(NULL, DELIM);
     if(token){
         syntax_error("Too many arguments");
-        return 0;
+        return NULL;
     }
-    return 1;
+    return message;
 }
 
 int is_exit(char* str){
@@ -196,4 +205,23 @@ char* to_upper_case(char* str, int len){
 
 void syntax_error(char* cause){
     printf("\n syntax error: %s \n\n", cause);
+}
+
+void send_message(int client_fd, _Message* message){
+    send(client_fd, &message->header, sizeof(message->header), 0);
+    send(client_fd, &message->body, sizeof(message->body), 0);
+
+    if(message->header.file_name_size>0){
+        if(send(client_fd, message->body.file_name, message->header.file_name_size, 0) == -1){
+            perror("send file_name");
+            return;
+        }
+    }
+
+    if(message->header.content_size>0){
+        if(send(client_fd, message->body.content, message->header.content_size, 0) == -1){
+            perror("send content");
+            return;
+        }
+    }
 }

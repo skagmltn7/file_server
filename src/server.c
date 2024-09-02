@@ -53,11 +53,9 @@ void connect_client(){
 		exit(EXIT_FAILURE);
 	}
 
-	if(setsockopt(listening_socket, SOL_SOCKET, 
-				SO_REUSEADDR,
-				&opt, sizeof(opt))){
-			log_error(log_file);
-			exit(EXIT_FAILURE);	
+	if(setsockopt(listening_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))){
+        log_error(log_file);
+        exit(EXIT_FAILURE);
 	}
 
 	memset(&addr, 0, sizeof(addr));
@@ -70,56 +68,96 @@ void connect_client(){
 		exit(EXIT_FAILURE);	
 	}
 
-	if(listen(listening_socket, 1) <0){
+	if(listen(listening_socket, SOMAXCONN) < 0){
 		log_error(log_file);
 		exit(EXIT_FAILURE);	
 	}
 
-	if((client_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) < 0 ){
-		log_error(log_file);
-		exit(EXIT_FAILURE);
+	while((client_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) >= 0 ){
+        printf("\nConnected to %s\n", inet_ntoa(addr.sin_addr));
+        exec_command(client_socket);
+
+        printf("\nConnection to %s closed.\n", inet_ntoa(addr.sin_addr));
+        close(client_socket);
 	}
 
-    printf("\nConnected to %s\n", inet_ntoa(addr.sin_addr));
-    exec_command(client_socket);
-
-    printf("\nConnection to %s closed.\n", inet_ntoa(addr.sin_addr));
-    close(client_socket);
-    // TODO: 멀티스레드 환경 변경시 수정
     close(listening_socket);
+
+	if(client_socket < 0){
+        log_error(log_file);
+        exit(EXIT_FAILURE);
+    }
 }
 
 void exec_command(int client_socket){
     ssize_t valread;
     char* file_path = NULL;
 
-    _Message* message = (_Message*)malloc(sizeof(_Message));
-    _Response* response = (_Response*)malloc(sizeof(_Response));
-    if(!message || !response){
-        log(log_file, LOG_LEVEL_ERROR, "%s\n", "Memory allocation failed");
-        return;
-    }
-
 	while(1){
-	    memset(message, 0, sizeof(*message));
-	    memset(response, 0, sizeof(*response));
-
-        valread = recv(client_socket, message, sizeof(*message), 0);
-        if(valread<=0){
+        _Message* message = (_Message*)calloc(1, sizeof(_Message));
+        if(!message){
+            perror("message calloc error");
             break;
         }
 
-        switch(message->header.type){
+        valread = recv(client_socket, &message->header, sizeof(message->header), 0) ;
+        if(valread < 0){
+            perror("recv header error");
+            continue;
+        }else if(valread == 0){
+            shutdown(client_socket, SHUT_RDWR);
+            break;
+        }
+
+        valread = recv(client_socket, &message->body, sizeof(MessageBody), 0);
+        if(valread < 0){
+            perror("recv body error");
+            break;
+        }
+
+        if(message->header.file_name_size > 0){
+            message->body.file_name = (char*)calloc(message->header.file_name_size, sizeof(char));
+            if (!message->body.file_name) {
+                perror("Failed to allocate file name memory");
+                break;
+            }
+            valread = recv(client_socket, message->body.file_name, message->header.file_name_size, 0);
+            if(valread < 0){
+                perror("recv name error");
+                break;
+            }
+        }
+
+        if(message->header.content_size > 0){
+            message->body.content = (char*)calloc(message->header.content_size, sizeof(char));
+            if (!message->body.content) {
+                perror("Failed to allocate content memory");
+                break;
+            }
+            valread = recv(client_socket, message->body.content, message->header.content_size, 0);
+            if(valread < 0){
+                perror("recv content error");
+                break;
+            }
+        }
+
+        _Response* response = (_Response*)calloc(1, sizeof(_Response));
+        if(!response){
+            perror("response calloc error");
+            break;
+        }
+
+        switch(message->body.type){
             case GETALL:
                 command_getall(response);
                 break;
             case DELETE:
-                file_path = get_file_path(FILE_HOME, message->header.file_name, NULL);
+                file_path = get_file_path(FILE_HOME, message->body.file_name, NULL);
                 command_delete(message, file_path, response);
                 free(file_path);
                 break;
             case GET: case PUT:
-                file_path = get_file_path(FILE_HOME, message->header.file_name, NULL);
+                file_path = get_file_path(FILE_HOME, message->body.file_name, NULL);
                 sync_file_io(message, file_path, response);
                 free(file_path);
                 break;
@@ -128,27 +166,45 @@ void exec_command(int client_socket){
                 make_response(response, ERROR, "Invalid command");
                 break;
         }
-        send(client_socket, response, sizeof(*response), 0);
+
+        send(client_socket, &response->header, sizeof(response->header), 0);
+        send(client_socket, &response->body, sizeof(response->body), 0);
+        if(response->header.data_size > 0){
+            send(client_socket, response->body.data, response->header.data_size, 0);
+        }
+
+        if(message->header.file_name_size>0){
+            free(message->body.file_name);
+        }
+        if(message->body.content>0){
+            free(message->body.content);
+        }
+        if(!message)
+            free(message);
+
+        if(response->header.data_size > 0){
+            free(response->body.data);
+        }
+        if(!response)
+            free(response);
 	}
-    free(message);
-    free(response);
 }
 
 void sync_file_io(_Message* message, char* file_path, _Response* response){
 	FILE* fp = open_and_seek_file(message, file_path);
 
-	if(message->header.type == PUT){
+	if(message->body.type == PUT){
         command_put(&fp, message, file_path, response);
-    }else if(message->header.type == GET){
+    }else if(message->body.type == GET){
         command_get(fp, message->body.length, response);
     }
-	if(fp!=NULL){
+	if(fp){
 	    fclose(fp);
 	}
 }
 
 void command_get(FILE* fp, int length, _Response* response){
-    if(fp == NULL){
+    if(!fp){
         log_error(log_file);
         make_response(response, ERROR, "The file could not be found.");
         return;
@@ -156,13 +212,14 @@ void command_get(FILE* fp, int length, _Response* response){
 
     char* ret = NULL;
     int length_left = length;
+    response->body.data = (char*)malloc(length * sizeof(char));
 
     while(length_left > 0 && !feof(fp)){
         char buffer[MAX_BUF_SIZE] = {0};
         int length_read = length_left > MAX_BUF_SIZE ? MAX_BUF_SIZE : length_left+1;
         ret = fgets(buffer, length_read, fp);
 
-        if(ret == NULL){
+        if(!ret){
             if(feof(fp)) {
                 break;
             }
@@ -175,11 +232,12 @@ void command_get(FILE* fp, int length, _Response* response){
         length_left -= strlen(ret);
         if(buffer[strlen(ret)-1]=='\n') length_left++;
     }
-    strcat(response->body.data, "\n");
+    strcat(response->body.data, "\0");
+    response->header.data_size = strlen(response->body.data);
 }
 
 void command_put(FILE** fp, _Message* message, char* file_path, _Response* response){
-    if(*fp==NULL){
+    if(!*fp){
         log_info(log_file, "Creating file...\n");
         *fp = fopen(file_path, "w+");
     }
@@ -190,7 +248,7 @@ void command_put(FILE** fp, _Message* message, char* file_path, _Response* respo
 FILE* open_and_seek_file(_Message* message, char* file_path){
     FILE* fp = fopen(file_path, "r+");
 
-    if(fp!=NULL){
+    if(fp){
         log_info(log_file, "The file is opened\n");
         fseek(fp, message->body.offset, SEEK_SET);
     }
@@ -218,6 +276,24 @@ void command_getall(_Response* response){
         return;
     }
 
+    long long total_size = 0;
+
+    while((dir = readdir(dp)) != NULL){
+        char* path = get_file_path(FILE_HOME, dir->d_name, NULL);
+        if (lstat(path, &buf) != 0 || S_ISDIR(buf.st_mode)) {
+            continue;
+        }
+        total_size += strlen(dir->d_name)+1;
+        free(path);
+    }
+    response->header.data_size = total_size;
+    response->body.data = (char*)malloc(response->header.data_size * sizeof(char));
+    if(!response->body.data){
+        log_error(log_file);
+        return;
+    }
+
+    dp = opendir(FILE_HOME);
     while((dir = readdir(dp)) != NULL){
         char* path = get_file_path(FILE_HOME, dir->d_name, NULL);
 
@@ -242,7 +318,7 @@ char* get_file_path(const char* file_home, ...){
     va_end(args_copy);
 
     char* ret = (char*)malloc((length + 1) * sizeof(char));
-    if (ret == NULL) {
+    if (!ret) {
         perror("malloc failed");
         exit(EXIT_FAILURE);
     }
