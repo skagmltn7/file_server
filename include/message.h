@@ -4,9 +4,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define MAX_FILE_NAME_SIZE 256
-#define MAX_MESSAGE_SIZE 1024
-
 typedef enum{
 	GETALL,
 	GET,
@@ -16,14 +13,17 @@ typedef enum{
 } MessageType;
 
 typedef struct{
-	MessageType type;
-	char file_name[MAX_FILE_NAME_SIZE];
+    size_t file_name_size;
+    size_t content_size;
+	// FD 매핑정보
 } MessageHeader;
 
 typedef struct{
-	long offset;
+    MessageType type;
+	char* file_name;
+    long offset;
 	int length;
-	char content[MAX_MESSAGE_SIZE];
+	char* content;
 } MessageBody;
 
 typedef struct{
@@ -37,11 +37,12 @@ typedef enum{
 } ResponseStatus;
 
 typedef struct{
-	ResponseStatus status;
+    size_t data_size;
 } ResponseHeader;
 
 typedef struct{
-	char data[MAX_MESSAGE_SIZE];
+    ResponseStatus status;
+	char* data;
 } ResponseBody;
 
 typedef struct{
