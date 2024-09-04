@@ -8,7 +8,7 @@
 #include "../include/message.h"
 
 #define PORT 8080
-#define BUF_SIZE 1024
+#define BUF_SIZE 32768
 #define LOCAL_HOST "127.0.0.1"
 #define EXIT "EXIT"
 #define DELIM " \n"
@@ -42,12 +42,14 @@ void connect_server(){
 
 	if(inet_pton(AF_INET, LOCAL_HOST, &server_addr.sin_addr) <= 0){
 		perror("\n Unsupported / Invalid address");
+		close(client_fd);
 		return;
 	}
 
 	status = connect(client_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
 	if(status < 0){
 		perror("\n Connection Failed");
+		close(client_fd);
 		return;
 	}
 
@@ -80,100 +82,92 @@ void exec_command(int client_fd){
 
             response = (_Response*)calloc(1, sizeof(_Response));
             valread = recv(client_fd, &response->header, sizeof(response->header), 0);
-            if(valread <= 0){
-            // TODO
-                continue;
+            if(valread <=0){
+                perror("Failed to receive header");
+                break;
             }
 
-            valread = recv(client_fd, &response->body, sizeof(response->body), 0);
-            if(valread <= 0){
-            // TODO
-                continue;
-            }
-
-            if(response->body.status == ERROR){
+            if(response->header.status == ERROR){
                 printf("\n[ERROR]\n");
             }else{
                 printf("\n[DATA]\n");
             }
 
             if(response->header.data_size > 0){
-                response->body.data = (char*)calloc(response->header.data_size, sizeof(char));
-                valread = recv(client_fd, response->body.data, response->header.data_size, 0);
+                response->data = (char*)calloc(response->header.data_size, sizeof(char));
+                valread = recv(client_fd, response->data, response->header.data_size, 0);
                 if(valread <= 0){
                 // TODO
                     continue;
                 }
 
-                printf("\n%s\n\n", response->body.data);
             }
 
-            if(message->header.file_name_size>0)
-                free(message->body.file_name);
-            if(message->header.content_size>0)
-                free(message->body.content);
-            if(message)
-                free(message);
-
-            if(response->header.data_size>0)
-                free(response->body.data);
-            if(response)
-            free(response);
+            free_message(message);
+            free_response(response);
         }
     }
 }
 
 _Message* parse_command(char* input_buffer){
     _Message* message = (_Message*)malloc(sizeof(_Message));
-    message->body.file_name = NULL;
-    message->body.content = NULL;
+    message->file_name = NULL;
+    message->content = NULL;
 
     char* token = strtok(input_buffer,DELIM);
     if(!token){
         syntax_error("Empty command");
+        free_message(message);
         return NULL;
     }
-    message->body.type = get_message_type(to_upper_case(token, strlen(token)));
+    char* upper_token = to_upper_case(token, strlen(token));
+    message->header.type = get_message_type(upper_token);
+    free(upper_token);
 
-    if(message->body.type == UNKNOWN){
+    if(message->header.type == UNKNOWN){
         syntax_error("Undefined Command");
+        free_message(message);
         return NULL;
     }
 
-    if(message->body.type != GETALL){
+    if(message->header.type != GETALL){
         token = strtok(NULL, DELIM);
         if(!token){
             syntax_error("Missing arguments");
+            free_message(message);
             return NULL;
         }
         message->header.file_name_size = (strlen(token)+1) * sizeof(char);
-        message->body.file_name = (char*)calloc(strlen(token)+1, sizeof(char));
-        strncpy(message->body.file_name, token, strlen(token)+1);
+        message->file_name = (char*)calloc(strlen(token)+1, sizeof(char));
+        strncpy(message->file_name, token, strlen(token)+1);
 
-        if(message->body.type != DELETE){
+        if(message->header.type != DELETE){
             token = strtok(NULL, DELIM);
             if(!token){
                 syntax_error("Missing arguments");
+                free_message(message);
                 return NULL;
             }
             char* endptr;
-            message->body.offset = strtol(token, &endptr, 10);
+            message->header.offset = strtol(token, &endptr, 10);
 
-            if(message->body.type == GET){
+            if(message->header.type == GET){
                 token = strtok(NULL, DELIM);
                 if(!token){
                     syntax_error("Missing arguments");
+                    free_message(message);
                     return NULL;
                 }
-                message->body.length = atoi(token);
-            }else if(message->body.type == PUT){
+                message->header.length = atoi(token);
+            }else if(message->header.type == PUT){
                 token = strtok(NULL, "");
                 if(!token){
                     syntax_error("Missing arguments");
+                    free_message(message);
                     return NULL;
                 }
-                message->body.content = (char*)calloc(strlen(token)+1, sizeof(char));
-                strncpy(message->body.content, token, strlen(token)+1);
+                message->content = (char*)calloc(strlen(token)+1, sizeof(char));
+                strncpy(message->content, token, strlen(token)+1);
                 message->header.content_size = (strlen(token)+1) * sizeof(char);
             }
         }
@@ -209,17 +203,16 @@ void syntax_error(char* cause){
 
 void send_message(int client_fd, _Message* message){
     send(client_fd, &message->header, sizeof(message->header), 0);
-    send(client_fd, &message->body, sizeof(message->body), 0);
 
     if(message->header.file_name_size>0){
-        if(send(client_fd, message->body.file_name, message->header.file_name_size, 0) == -1){
+        if(send(client_fd, message->file_name, message->header.file_name_size, 0) == -1){
             perror("send file_name");
             return;
         }
     }
 
     if(message->header.content_size>0){
-        if(send(client_fd, message->body.content, message->header.content_size, 0) == -1){
+        if(send(client_fd, message->content, message->header.content_size, 0) == -1){
             perror("send content");
             return;
         }

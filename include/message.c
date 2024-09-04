@@ -14,10 +14,28 @@ MessageType get_message_type(char* input){
 }
 
 void make_response(_Response* response, ResponseStatus status, char* data){
-    response->body.status = status;
+    response->header.status = status;
     response->header.data_size = strlen(data)+1;
-    response->body.data = (char*)calloc(response->header.data_size, sizeof(char));
-    strncpy(response->body.data, data, response->header.data_size);
+    response->data = (char*)calloc(response->header.data_size, sizeof(char));
+    strncpy(response->data, data, response->header.data_size);
 }
 }
 
+
+void free_message(_Message* message){
+    if(message){
+        if(message->file_name)
+            free(message->file_name);
+        if(message->content)
+            free(message->content);
+        free(message);
+    }
+}
+
+void free_response(_Response* response){
+    if(response){
+        if(response->data)
+            free(response->data);
+        free(response);
+    }
+}
