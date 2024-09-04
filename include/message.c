@@ -19,23 +19,30 @@ void make_response(_Response* response, ResponseStatus status, char* data){
     response->data = (char*)calloc(response->header.data_size, sizeof(char));
     strncpy(response->data, data, response->header.data_size);
 }
-}
 
 
 void free_message(_Message* message){
     if(message){
-        if(message->file_name)
+        if(message->file_name){
             free(message->file_name);
-        if(message->content)
+            message->file_name = NULL;
+        }
+        if(message->content){
             free(message->content);
+            message->content = NULL;
+        }
         free(message);
+        message = NULL;
     }
 }
 
 void free_response(_Response* response){
     if(response){
-        if(response->data)
+        if(response->data){
             free(response->data);
+            response->data = NULL;
+        }
         free(response);
+        response = NULL;
     }
 }

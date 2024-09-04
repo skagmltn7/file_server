@@ -145,6 +145,7 @@ void* cthr_func(void* arg){
     }
     close(listening_socket);
     free(queue);
+    queue = NULL;
     return NULL;
 }
 
@@ -211,11 +212,13 @@ void process_job(Job* job){
             file_path = get_file_path(FILE_HOME, message->file_name, NULL);
             command_delete(message, file_path, response);
             free(file_path);
+            file_path = NULL;
             break;
         case GET: case PUT:
             file_path = get_file_path(FILE_HOME, message->file_name, NULL);
             sync_file_io(message, file_path, response);
             free(file_path);
+            file_path = NULL;
             break;
         default:
             log(log_file, LOG_LEVEL_ERROR, "%s\n", "Invalid command");
@@ -328,6 +331,7 @@ void command_getall(_Response* response){
         }
         total_size += strlen(dir->d_name)+1;
         free(path);
+        path = NULL;
     }
     response->header.data_size = total_size;
     response->data = (char*)malloc(response->header.data_size * sizeof(char));
@@ -349,6 +353,7 @@ void command_getall(_Response* response){
         strcat(response->data, dir->d_name);
         strcat(response->data, "\n");
         free(path);
+        path = NULL;
     }
     closedir(dp);
 }
@@ -396,6 +401,7 @@ FILE* init_server(){
     char* log_file_name = get_file_path(LOG_FILE_HOME, "server_", pid_str, NULL);
     log_file = fopen(log_file_name, "a+");
     free(log_file_name);
+    log_file_name = NULL;
     return log_file;
 }
 
@@ -405,13 +411,9 @@ void* wthr_func(void* arg) {
         Job* job = pop(queue);
         if (job != NULL) {
             process_job(job);
-            if(job->message->file_name)
-                free(job->message->file_name);
-            if(job->message->content)
-                free(job->message->content);
-            if(job->message)
-                free(job->message);
+            free_message(job->message);
             free(job);
+            job=NULL;
         }
     }
 }

@@ -123,6 +123,7 @@ _Message* parse_command(char* input_buffer){
     char* upper_token = to_upper_case(token, strlen(token));
     message->header.type = get_message_type(upper_token);
     free(upper_token);
+    upper_token = NULL;
 
     if(message->header.type == UNKNOWN){
         syntax_error("Undefined Command");
