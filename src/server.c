@@ -8,45 +8,63 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdarg.h>
+#include <pthread.h>
+#include <sys/ioctl.h>
 
 #include "../include/message.h"
 #include "../include/logging.h"
+#include "../include/job.h"
 
 #define PORT 8080
 #define MAX_BUF_SIZE 1024
 #define FILE_HOME "./file/"
 #define LOG_FILE_HOME "./log/"
+#define WTHR_NUM 5
 
 FILE* log_file;
 
-void connect_client();
 void sync_file_io(_Message* message, char* file_path, _Response* response);
-void exec_command(int new_socket);
+_Message* create_message(int new_socket);
 void command_get(FILE* fp, int length, _Response* response);
 void command_put(FILE** fp, _Message* message, char* file_path, _Response* response);
 FILE* open_and_seek_file(_Message* message, char* file_path);
 void command_delete(_Message* message, char* file_path, _Response* response);
 void command_getall(_Response* response);
-char* get_file_path(const char* file_home, ...);
-size_t compute_length(const char* first, va_list args);
 FILE* init_server();
+void* cthr_func(void* arg);
+void* wthr_func(void* arg);
+void process_job(Job* job);
+void send_response(Job* job, _Response* response);
 
 int main(int argc, char const* argv[]){
     log_file = init_server();
     log_info(log_file, "Starting server...\n");
 
-	connect_client();
+    pthread_t cthr;
+
+    pthread_create(&cthr, NULL, cthr_func, NULL);
+    pthread_join(cthr, NULL);
 
 	log_info(log_file, "Shutdown server...\n");
 	fclose(log_file);
 	return 0;
 }
 
-void connect_client(){
+void* cthr_func(void* arg){
     int listening_socket, client_socket;
 	struct sockaddr_in addr;
 	int opt = 1;
 	socklen_t addrlen = sizeof(addr);
+	fd_set read_fds, copy_rdfds;
+	struct timeval timeout;
+
+    pthread_t wthr[WTHR_NUM];
+    JobQueue* queue = (JobQueue*)malloc(sizeof(JobQueue));
+    init_queue(queue);
+
+    for(int i=0; i < WTHR_NUM; i++){
+        pthread_create(&wthr[i], NULL, wthr_func, queue);
+    }
 
 	if((listening_socket = socket(AF_INET, SOCK_STREAM,0))<0){
         log_error(log_file);
@@ -58,6 +76,11 @@ void connect_client(){
         exit(EXIT_FAILURE);
 	}
 
+    if(ioctl(listening_socket, FIONBIO, (char*)&opt) < 0){
+        log_error(log_file);
+        exit(EXIT_FAILURE);
+    }
+
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = INADDR_ANY;
@@ -65,138 +88,183 @@ void connect_client(){
 
 	if (bind(listening_socket, (struct sockaddr*)&addr, sizeof(addr)) < 0){
 	    log_error(log_file);
-		exit(EXIT_FAILURE);	
+		exit(EXIT_FAILURE);
 	}
 
 	if(listen(listening_socket, SOMAXCONN) < 0){
 		log_error(log_file);
-		exit(EXIT_FAILURE);	
+		exit(EXIT_FAILURE);
 	}
 
-	while((client_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) >= 0 ){
-        printf("\nConnected to %s\n", inet_ntoa(addr.sin_addr));
-        exec_command(client_socket);
+    FD_ZERO(&read_fds);
+    FD_SET(listening_socket, &read_fds);
+    int max_sd = listening_socket;
 
-        printf("\nConnection to %s closed.\n", inet_ntoa(addr.sin_addr));
-        close(client_socket);
-	}
+    while (1) {
+        copy_rdfds = read_fds;
 
-    close(listening_socket);
+        if ((select(max_sd + 1, &copy_rdfds, NULL, NULL, NULL) < 0) && (errno != EINTR)) {
+            log_error(log_file);
+            break;
+        }
+        for(int i = 0; i <= max_sd; i++){
+            if (FD_ISSET(i, &copy_rdfds)) {
+                if(i == listening_socket){
+                    if ((client_socket = accept(listening_socket, (struct sockaddr*)&addr, &addrlen)) < 0) {
+                        log_error(log_file);
+                        continue;
+                    }
+                    FD_SET(client_socket, &read_fds);
+                    if (client_socket > max_sd) {
+                        max_sd = client_socket;
+                    }
+                    printf("\nConnected\n");
+                }else{
+                    _Message* message = create_message(i);
+                    if(!message){
+                        close(i);
+                        FD_CLR(i, &read_fds);
+                        continue;
+                    }
 
-	if(client_socket < 0){
-        log_error(log_file);
-        exit(EXIT_FAILURE);
+                    Job* job = (Job*)malloc(sizeof(Job));
+                    if(!job){
+                        perror("job malloc error");
+                        continue;
+                    }
+                    job->client_socket = i;
+                    job->message = message;
+                    push(queue, job);
+                }
+            }
+        }
     }
+    close(listening_socket);
+    free(queue);
+    queue = NULL;
+    return NULL;
 }
 
-void exec_command(int client_socket){
+_Message* create_message(int client_socket){
     ssize_t valread;
+
+    _Message* message = (_Message*)calloc(1, sizeof(_Message));
+    if(!message){
+        log(log_file, LOG_LEVEL_ERROR,"recv header error : %s\n", strerror(errno));
+        return NULL;
+    }
+
+    valread = recv_full(client_socket, &message->header, sizeof(message->header));
+    if(valread < 0){
+        log(log_file, LOG_LEVEL_ERROR,"recv header error : %s\n", strerror(errno));
+        free_message(message);
+        return NULL;
+    }else if(valread == 0){
+        shutdown(client_socket, SHUT_RDWR);
+        log_info(log_file, "Client disconnected\n");
+        printf("\nUnconnected\n");
+        free_message(message);
+        return NULL;
+    }
+
+    if(message->header.file_name_size > 0) {
+        message->file_name = (char*)calloc(message->header.file_name_size, sizeof(char));
+        if (!message->file_name) {
+            log(log_file, LOG_LEVEL_ERROR,"Failed to allocate file name memory : %s\n", strerror(errno));
+            free_message(message);
+            return NULL;
+        }
+
+        valread = recv_full(client_socket, message->file_name, message->header.file_name_size);
+        if(valread < 0) {
+            log(log_file, LOG_LEVEL_ERROR,"recv file name error : %s\n", strerror(errno));
+            free_message(message);
+            return NULL;
+        }
+    }
+
+    if(message->header.content_size > 0){
+        message->content = (char*)calloc(message->header.content_size, sizeof(char));
+        if (!message->content) {
+            log(log_file, LOG_LEVEL_ERROR,"Failed to allocate content memory : %s\n", strerror(errno));
+            free_message(message);
+            return NULL;
+        }
+
+        valread = recv_full(client_socket, message->content, message->header.content_size);
+        if(valread < 0){
+            log(log_file, LOG_LEVEL_ERROR,"recv content error : %s\n", strerror(errno));
+            free_message(message);
+            return NULL;
+        }
+    }
+    return message;
+}
+
+void process_job(Job* job){
     char* file_path = NULL;
-
-	while(1){
-        _Message* message = (_Message*)calloc(1, sizeof(_Message));
-        if(!message){
-            perror("message calloc error");
+    _Message* message = job->message;
+    _Response* response = (_Response*)calloc(1, sizeof(_Response));
+    if(!response){
+        log(log_file, LOG_LEVEL_ERROR,"response calloc error : %s\n", strerror(errno));
+        return;
+    }
+    switch(message->header.type){
+        case GETALL:
+            command_getall(response);
             break;
-        }
-
-        valread = recv(client_socket, &message->header, sizeof(message->header), 0) ;
-        if(valread < 0){
-            perror("recv header error");
-            continue;
-        }else if(valread == 0){
-            shutdown(client_socket, SHUT_RDWR);
-            break;
-        }
-
-        valread = recv(client_socket, &message->body, sizeof(MessageBody), 0);
-        if(valread < 0){
-            perror("recv body error");
-            break;
-        }
-
-        if(message->header.file_name_size > 0){
-            message->body.file_name = (char*)calloc(message->header.file_name_size, sizeof(char));
-            if (!message->body.file_name) {
-                perror("Failed to allocate file name memory");
+        case DELETE:
+            file_path = get_file_path(FILE_HOME, log_file, message->file_name, NULL);
+            if(!file_path){
+                log(log_file, LOG_LEVEL_ERROR, "%s\n", "Failed to get file path");
+                make_response(response, ERROR, "Failed to get file path");
                 break;
             }
-            valread = recv(client_socket, message->body.file_name, message->header.file_name_size, 0);
-            if(valread < 0){
-                perror("recv name error");
-                break;
-            }
-        }
-
-        if(message->header.content_size > 0){
-            message->body.content = (char*)calloc(message->header.content_size, sizeof(char));
-            if (!message->body.content) {
-                perror("Failed to allocate content memory");
-                break;
-            }
-            valread = recv(client_socket, message->body.content, message->header.content_size, 0);
-            if(valread < 0){
-                perror("recv content error");
-                break;
-            }
-        }
-
-        _Response* response = (_Response*)calloc(1, sizeof(_Response));
-        if(!response){
-            perror("response calloc error");
+            command_delete(message, file_path, response);
+            free(file_path);
+            file_path = NULL;
             break;
-        }
-
-        switch(message->body.type){
-            case GETALL:
-                command_getall(response);
+        case GET: case PUT:
+            file_path = get_file_path(FILE_HOME, message->file_name, NULL);
+            if(!file_path){
+                log(log_file, LOG_LEVEL_ERROR, "%s\n", "Failed to get file path");
+                make_response(response, ERROR, "Failed to get file path");
                 break;
-            case DELETE:
-                file_path = get_file_path(FILE_HOME, message->body.file_name, NULL);
-                command_delete(message, file_path, response);
-                free(file_path);
-                break;
-            case GET: case PUT:
-                file_path = get_file_path(FILE_HOME, message->body.file_name, NULL);
-                sync_file_io(message, file_path, response);
-                free(file_path);
-                break;
-            default:
-                log(log_file, LOG_LEVEL_ERROR, "%s\n", "Invalid command");
-                make_response(response, ERROR, "Invalid command");
-                break;
-        }
+            }
+            sync_file_io(message, file_path, response);
+            free(file_path);
+            file_path = NULL;
+            break;
+        default:
+            log(log_file, LOG_LEVEL_ERROR, "%s\n", "Invalid command");
+            make_response(response, ERROR, "Invalid command");
+            break;
+    }
+    send_response(job, response);
+}
 
-        send(client_socket, &response->header, sizeof(response->header), 0);
-        send(client_socket, &response->body, sizeof(response->body), 0);
-        if(response->header.data_size > 0){
-            send(client_socket, response->body.data, response->header.data_size, 0);
-        }
+void send_response(Job* job, _Response* response){
+    if (send_full(job->client_socket, &response->header, sizeof(response->header)) == -1) {
+        log(log_file, LOG_LEVEL_ERROR,"send header : %s\n", strerror(errno));
+        return;
+    }
 
-        if(message->header.file_name_size>0){
-            free(message->body.file_name);
+    if(response->header.data_size > 0){
+        if (send_full(job->client_socket, response->data, response->header.data_size) == -1) {
+            log(log_file, LOG_LEVEL_ERROR,"send data : %s\n", strerror(errno));
+            return;
         }
-        if(message->body.content>0){
-            free(message->body.content);
-        }
-        if(!message)
-            free(message);
-
-        if(response->header.data_size > 0){
-            free(response->body.data);
-        }
-        if(!response)
-            free(response);
-	}
+    }
+    free_response(response);
 }
 
 void sync_file_io(_Message* message, char* file_path, _Response* response){
 	FILE* fp = open_and_seek_file(message, file_path);
 
-	if(message->body.type == PUT){
+	if(message->header.type == PUT){
         command_put(&fp, message, file_path, response);
-    }else if(message->body.type == GET){
-        command_get(fp, message->body.length, response);
+    }else if(message->header.type == GET){
+        command_get(fp, message->header.length, response);
     }
 	if(fp){
 	    fclose(fp);
@@ -212,7 +280,7 @@ void command_get(FILE* fp, int length, _Response* response){
 
     char* ret = NULL;
     int length_left = length;
-    response->body.data = (char*)malloc(length * sizeof(char));
+    response->data = (char*)malloc(length * sizeof(char));
 
     while(length_left > 0 && !feof(fp)){
         char buffer[MAX_BUF_SIZE] = {0};
@@ -228,12 +296,12 @@ void command_get(FILE* fp, int length, _Response* response){
         }
 
         if(!strcmp(ret,"\n")) continue;
-        strcat(response->body.data, ret);
+        strcat(response->data, ret);
         length_left -= strlen(ret);
         if(buffer[strlen(ret)-1]=='\n') length_left++;
     }
-    strcat(response->body.data, "\0");
-    response->header.data_size = strlen(response->body.data);
+    strcat(response->data, "\0");
+    response->header.data_size = strlen(response->data)+1;
 }
 
 void command_put(FILE** fp, _Message* message, char* file_path, _Response* response){
@@ -241,7 +309,7 @@ void command_put(FILE** fp, _Message* message, char* file_path, _Response* respo
         log_info(log_file, "Creating file...\n");
         *fp = fopen(file_path, "w+");
     }
-    fputs(message->body.content, *fp);
+    fputs(message->content, *fp);
     make_response(response, SUCCESS, "File written successfully.\n");
 }
 
@@ -250,7 +318,7 @@ FILE* open_and_seek_file(_Message* message, char* file_path){
 
     if(fp){
         log_info(log_file, "The file is opened\n");
-        fseek(fp, message->body.offset, SEEK_SET);
+        fseek(fp, message->header.offset, SEEK_SET);
     }
 
     return fp;
@@ -285,10 +353,11 @@ void command_getall(_Response* response){
         }
         total_size += strlen(dir->d_name)+1;
         free(path);
+        path = NULL;
     }
     response->header.data_size = total_size;
-    response->body.data = (char*)malloc(response->header.data_size * sizeof(char));
-    if(!response->body.data){
+    response->data = (char*)malloc(response->header.data_size * sizeof(char));
+    if(!response->data){
         log_error(log_file);
         return;
     }
@@ -301,45 +370,12 @@ void command_getall(_Response* response){
             continue;
         }
 
-        strcat(response->body.data, dir->d_name);
-        strcat(response->body.data, "\n");
+        strcat(response->data, dir->d_name);
+        strcat(response->data, "\n");
         free(path);
+        path = NULL;
     }
     closedir(dp);
-}
-
-char* get_file_path(const char* file_home, ...){
-    va_list args;
-    va_start(args, file_home);
-
-    va_list args_copy;
-    va_copy(args_copy, args);
-    size_t length = compute_length(file_home, args_copy);
-    va_end(args_copy);
-
-    char* ret = (char*)malloc((length + 1) * sizeof(char));
-    if (!ret) {
-        perror("malloc failed");
-        exit(EXIT_FAILURE);
-    }
-
-    strcpy(ret, file_home);
-    const char* str;
-    while ((str = va_arg(args, const char*)) != NULL) {
-        strcat(ret, str);
-    }
-
-    va_end(args);
-    return ret;
-}
-
-size_t compute_length(const char* first, va_list args) {
-    size_t length = strlen(first);
-    const char* str;
-    while ((str = va_arg(args, const char*)) != NULL) {
-        length += strlen(str);
-    }
-    return length;
 }
 
 FILE* init_server(){
@@ -351,5 +387,19 @@ FILE* init_server(){
     char* log_file_name = get_file_path(LOG_FILE_HOME, "server_", pid_str, NULL);
     log_file = fopen(log_file_name, "a+");
     free(log_file_name);
+    log_file_name = NULL;
     return log_file;
+}
+
+void* wthr_func(void* arg) {
+    JobQueue* queue = (JobQueue*)arg;
+    while (1) {
+        Job* job = pop(queue);
+        if (job != NULL) {
+            process_job(job);
+            free_message(job->message);
+            free(job);
+            job=NULL;
+        }
+    }
 }

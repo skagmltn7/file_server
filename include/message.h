@@ -3,6 +3,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 
 typedef enum{
 	GETALL,
@@ -15,20 +16,16 @@ typedef enum{
 typedef struct{
     size_t file_name_size;
     size_t content_size;
-	// FD 매핑정보
+    size_t data_size;
+    MessageType type;
+    long offset;
+	int length;
 } MessageHeader;
 
 typedef struct{
-    MessageType type;
-	char* file_name;
-    long offset;
-	int length;
 	char* content;
-} MessageBody;
-
-typedef struct{
-	MessageHeader header;
-	MessageBody body;
+	char* file_name;
+    MessageHeader header;
 } _Message;
 
 typedef enum{
@@ -38,18 +35,18 @@ typedef enum{
 
 typedef struct{
     size_t data_size;
+    ResponseStatus status;
 } ResponseHeader;
 
 typedef struct{
-    ResponseStatus status;
 	char* data;
-} ResponseBody;
-
-typedef struct{
 	ResponseHeader header;
-	ResponseBody body;
 } _Response;
 
 MessageType get_message_type(char* input);
 void make_response(_Response* response, ResponseStatus status, char* data);
+void free_message(_Message* message);
+void free_response(_Response* response);
+ssize_t recv_full(int sockfd, void *buffer, size_t length);
+ssize_t send_full(int sockfd, const void *buffer, size_t length);
 #endif
