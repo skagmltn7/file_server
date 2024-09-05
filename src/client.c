@@ -4,26 +4,36 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #include "../include/message.h"
+#include "../include/logging.h"
 
 #define PORT 8080
-#define BUF_SIZE 32768
+#define BUF_SIZE 1024
 #define LOCAL_HOST "127.0.0.1"
 #define EXIT "EXIT"
 #define DELIM " \n"
+#define LOG_FILE_HOME "./log/"
+
+FILE* log_file;
 
 int is_exit(char* str);
 char* to_upper_case(char* str, int len);
-void syntax_error(char* cause);
 void connect_server();
 void exec_command(int client_fd);
 _Message* parse_command(char* input_buffer);
 int check_too_many_args(char* token);
 void send_message(int client_fd, _Message* message);
+FILE* init_client();
 
 int main(int argc, char const* argv[]){
+    log_file = init_client();
+    log_info(log_file, "Starting client...\n");
+
     connect_server();
+    log_info(log_file, "Shutdown client...\n");
+    fclose(log_file);
     return 0;
 }
 
@@ -32,6 +42,7 @@ void connect_server(){
 	struct sockaddr_in server_addr;
 
 	if((client_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+	    log(log_file, LOG_LEVEL_ERROR,"Can not create socket : %s\n", strerror(errno));
 		perror("\n Can not create socket");
 		return;
 	}
@@ -41,6 +52,7 @@ void connect_server(){
 	server_addr.sin_port = htons(PORT);
 
 	if(inet_pton(AF_INET, LOCAL_HOST, &server_addr.sin_addr) <= 0){
+	    log(log_file, LOG_LEVEL_ERROR,"Unsupported / Invalid address : %s\n", strerror(errno));
 		perror("\n Unsupported / Invalid address");
 		close(client_fd);
 		return;
@@ -48,6 +60,7 @@ void connect_server(){
 
 	status = connect(client_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
 	if(status < 0){
+	    log(log_file, LOG_LEVEL_ERROR,"Connection Failed : %s\n", strerror(errno));
 		perror("\n Connection Failed");
 		close(client_fd);
 		return;
@@ -80,11 +93,19 @@ void exec_command(int client_fd){
         if(message){
             send_message(client_fd, message);
 
-            response = (_Response*)calloc(1, sizeof(_Response));
-            valread = recv(client_fd, &response->header, sizeof(response->header), 0);
-            if(valread <=0){
+            _Response *response = (_Response*)calloc(1, sizeof(_Response));
+            if (!response) {
+                log(log_file, LOG_LEVEL_ERROR,"Failed to allocate memory for response : %s\n", strerror(errno));
+                perror("Failed to allocate memory for response");
+                break;;
+            }
+
+            valread = recv_full(client_fd, &response->header, sizeof(response->header));
+            if (valread <= 0) {
+                log(log_file, LOG_LEVEL_ERROR,"Failed to receive header : %s\n", strerror(errno));
                 perror("Failed to receive header");
-                break;
+                free_response(response);
+                return;
             }
 
             if(response->header.status == ERROR){
@@ -93,16 +114,24 @@ void exec_command(int client_fd){
                 printf("\n[DATA]\n");
             }
 
-            if(response->header.data_size > 0){
+            if (response->header.data_size > 0) {
                 response->data = (char*)calloc(response->header.data_size, sizeof(char));
-                valread = recv(client_fd, response->data, response->header.data_size, 0);
-                if(valread <= 0){
-                // TODO
-                    continue;
+                if (!response->data) {
+                    log(log_file, LOG_LEVEL_ERROR,"Failed to allocate memory for data : %s\n", strerror(errno));
+                    perror("Failed to allocate memory for data");
+                    free_response(response);
+                    return;
                 }
 
+                valread = recv_full(client_fd, response->data, response->header.data_size);
+                if (valread <= 0) {
+                    log(log_file, LOG_LEVEL_ERROR,"Failed to receive data : %s\n", strerror(errno));
+                    perror("Failed to receive data");
+                    free_response(response);
+                    return;
+                }
             }
-
+            printf("%s\n", response->data);
             free_message(message);
             free_response(response);
         }
@@ -116,7 +145,8 @@ _Message* parse_command(char* input_buffer){
 
     char* token = strtok(input_buffer,DELIM);
     if(!token){
-        syntax_error("Empty command");
+        log(log_file, LOG_LEVEL_ERROR,"Empty command : %s\n", strerror(errno));
+        printf("\nEmpty command\n\n");
         free_message(message);
         return NULL;
     }
@@ -126,7 +156,8 @@ _Message* parse_command(char* input_buffer){
     upper_token = NULL;
 
     if(message->header.type == UNKNOWN){
-        syntax_error("Undefined Command");
+        log(log_file, LOG_LEVEL_ERROR, "Undefined Command : %s\n", strerror(errno));
+        printf("\nUndefined Command\n\n");
         free_message(message);
         return NULL;
     }
@@ -134,7 +165,8 @@ _Message* parse_command(char* input_buffer){
     if(message->header.type != GETALL){
         token = strtok(NULL, DELIM);
         if(!token){
-            syntax_error("Missing arguments");
+            log(log_file, LOG_LEVEL_ERROR,"Missing arguments : %s\n", strerror(errno));
+            printf("\nMissing arguments\n\n");
             free_message(message);
             return NULL;
         }
@@ -145,7 +177,8 @@ _Message* parse_command(char* input_buffer){
         if(message->header.type != DELETE){
             token = strtok(NULL, DELIM);
             if(!token){
-                syntax_error("Missing arguments");
+                log(log_file, LOG_LEVEL_ERROR,"Missing arguments : %s\n", strerror(errno));
+                printf("\nMissing arguments\n\n");
                 free_message(message);
                 return NULL;
             }
@@ -155,7 +188,8 @@ _Message* parse_command(char* input_buffer){
             if(message->header.type == GET){
                 token = strtok(NULL, DELIM);
                 if(!token){
-                    syntax_error("Missing arguments");
+                    log(log_file, LOG_LEVEL_ERROR,"Missing arguments : %s\n", strerror(errno));
+                    printf("\nMissing arguments\n\n");
                     free_message(message);
                     return NULL;
                 }
@@ -163,7 +197,8 @@ _Message* parse_command(char* input_buffer){
             }else if(message->header.type == PUT){
                 token = strtok(NULL, "");
                 if(!token){
-                    syntax_error("Missing arguments");
+                    log(log_file, LOG_LEVEL_ERROR,"Missing arguments : %s\n", strerror(errno));
+                    printf("\nMissing arguments\n\n");
                     free_message(message);
                     return NULL;
                 }
@@ -176,7 +211,8 @@ _Message* parse_command(char* input_buffer){
 
     token = strtok(NULL, DELIM);
     if(token){
-        syntax_error("Too many arguments");
+        log(log_file, LOG_LEVEL_ERROR,"Too many arguments : %s\n", strerror(errno));
+        printf("\nToo many arguments\n\n");
         return NULL;
     }
     return message;
@@ -198,24 +234,38 @@ char* to_upper_case(char* str, int len){
 	return res;
 }
 
-void syntax_error(char* cause){
-    printf("\n syntax error: %s \n\n", cause);
-}
-
 void send_message(int client_fd, _Message* message){
-    send(client_fd, &message->header, sizeof(message->header), 0);
+    if (send_full(client_fd, &message->header, sizeof(message->header)) == -1) {
+        log(log_file, LOG_LEVEL_ERROR,"send header : %s\n", strerror(errno));
+        perror("send header");
+        return;
+    }
 
-    if(message->header.file_name_size>0){
-        if(send(client_fd, message->file_name, message->header.file_name_size, 0) == -1){
+    if (message->header.file_name_size > 0) {
+        if (send_full(client_fd, message->file_name, message->header.file_name_size) == -1) {
+            log(log_file, LOG_LEVEL_ERROR,"send file_name : %s\n", strerror(errno));
             perror("send file_name");
             return;
         }
     }
 
-    if(message->header.content_size>0){
-        if(send(client_fd, message->content, message->header.content_size, 0) == -1){
+    if (message->header.content_size > 0) {
+        if (send_full(client_fd, message->content, message->header.content_size) == -1) {
+            log(log_file, LOG_LEVEL_ERROR,"send content : %s\n", strerror(errno));
             perror("send content");
             return;
         }
     }
+}
+
+FILE* init_client(){
+    mkdir(LOG_FILE_HOME,0755);
+
+    char pid_str[10];
+    snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+    char* log_file_name = get_file_path(LOG_FILE_HOME, "client_", pid_str, NULL);
+    log_file = fopen(log_file_name, "a+");
+    free(log_file_name);
+    log_file_name = NULL;
+    return log_file;
 }
