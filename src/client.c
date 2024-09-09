@@ -235,14 +235,14 @@ char* to_upper_case(char* str, int len){
 }
 
 void send_message(int client_fd, _Message* message){
-    if (send_full(client_fd, &message->header, sizeof(message->header)) == -1) {
+    if (send(client_fd, &message->header, sizeof(message->header), 0) == -1) {
         log(log_file, LOG_LEVEL_ERROR,"send header : %s\n", strerror(errno));
         perror("send header");
         return;
     }
 
     if (message->header.file_name_size > 0) {
-        if (send_full(client_fd, message->file_name, message->header.file_name_size) == -1) {
+        if (send(client_fd, message->file_name, message->header.file_name_size, 0) == -1) {
             log(log_file, LOG_LEVEL_ERROR,"send file_name : %s\n", strerror(errno));
             perror("send file_name");
             return;
@@ -250,7 +250,7 @@ void send_message(int client_fd, _Message* message){
     }
 
     if (message->header.content_size > 0) {
-        if (send_full(client_fd, message->content, message->header.content_size) == -1) {
+        if (send(client_fd, message->content, message->header.content_size, 0) == -1) {
             log(log_file, LOG_LEVEL_ERROR,"send content : %s\n", strerror(errno));
             perror("send content");
             return;

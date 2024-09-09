@@ -129,6 +129,7 @@ void* cthr_func(void* arg){
 
                     Job* job = (Job*)malloc(sizeof(Job));
                     if(!job){
+                        log(log_file, LOG_LEVEL_ERROR,"Failed to allocate job memory : %s\n", strerror(errno));
                         perror("job malloc error");
                         continue;
                     }
@@ -244,13 +245,13 @@ void process_job(Job* job){
 }
 
 void send_response(Job* job, _Response* response){
-    if (send_full(job->client_socket, &response->header, sizeof(response->header)) == -1) {
+    if (send(job->client_socket, &response->header, sizeof(response->header), 0) == -1) {
         log(log_file, LOG_LEVEL_ERROR,"send header : %s\n", strerror(errno));
         return;
     }
 
     if(response->header.data_size > 0){
-        if (send_full(job->client_socket, response->data, response->header.data_size) == -1) {
+        if (send(job->client_socket, response->data, response->header.data_size, 0) == -1) {
             log(log_file, LOG_LEVEL_ERROR,"send data : %s\n", strerror(errno));
             return;
         }

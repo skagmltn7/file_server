@@ -16,7 +16,6 @@ typedef enum{
 typedef struct{
     size_t file_name_size;
     size_t content_size;
-    size_t data_size;
     MessageType type;
     long offset;
 	int length;
@@ -48,5 +47,4 @@ void make_response(_Response* response, ResponseStatus status, char* data);
 void free_message(_Message* message);
 void free_response(_Response* response);
 ssize_t recv_full(int sockfd, void *buffer, size_t length);
-ssize_t send_full(int sockfd, const void *buffer, size_t length);
 #endif
