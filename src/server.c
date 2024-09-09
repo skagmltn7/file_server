@@ -129,6 +129,7 @@ void* cthr_func(void* arg){
 
                     Job* job = (Job*)malloc(sizeof(Job));
                     if(!job){
+                        log(log_file, LOG_LEVEL_ERROR,"Failed to allocate job memory : %s\n", strerror(errno));
                         perror("job malloc error");
                         continue;
                     }

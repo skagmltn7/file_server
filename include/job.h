@@ -7,16 +7,12 @@
 typedef struct{
     int client_socket;
     _Message* message;
+    struct Job* next;
 } Job;
 
-typedef struct Node{
-    Job* job;
-    struct Node* next;
-} Node;
-
 typedef struct{
-    Node* head;
-    Node* tail;
+    Job* head;
+    Job* tail;
     pthread_mutex_t mutex;
     pthread_cond_t cond;
 } JobQueue;

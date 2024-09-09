@@ -16,7 +16,6 @@ typedef enum{
 typedef struct{
     size_t file_name_size;
     size_t content_size;
-    size_t data_size;
     MessageType type;
     long offset;
 	int length;
